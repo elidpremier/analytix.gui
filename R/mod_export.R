@@ -1,9 +1,10 @@
-#' Module Exportation du Rapport Word
+#' Module Exportation du Rapport Word Global
 #' 
 #' @param id Identifiant du module Shiny
 #' @param data_reactive Reactive returning the cleaned data.frame
 #' @param univar_reactive Reactive returning univariate results
 #' @param bivar_reactive Reactive returning bivariate results
+#' @param spec_reactive Reactive returning specialized results
 
 mod_export_ui <- function(id) {
   ns <- NS(id)
@@ -27,6 +28,7 @@ mod_export_ui <- function(id) {
       checkboxInput(ns("inc_missing"), " Rapport sur les Données Manquantes", value = TRUE),
       checkboxInput(ns("inc_univar"), " Analyses Univariées", value = TRUE),
       checkboxInput(ns("inc_bivar"), " Analyses Bivariées", value = TRUE),
+      checkboxInput(ns("inc_spec"), " Analyses Spécialisées (Likert, Multi-choix)", value = TRUE),
       
       tags$hr(),
       downloadButton(
@@ -42,7 +44,7 @@ mod_export_ui <- function(id) {
       bslib::card(
         bslib::card_header(
           tags$div(
-            icon("eye", class = "me-2"), " Aperçu de la Structure du Document Word"
+            icon("eye", class = "me-2"), " Aperçu de la Structure du Document Word Global"
           )
         ),
         tags$div(
@@ -54,9 +56,10 @@ mod_export_ui <- function(id) {
           tags$h5("Sommaire des Tableaux & Figures qui seront générés :"),
           tags$ul(
             tags$li("Section 1 : Caractéristiques de la population d'étude"),
-            tags$li("Section 2 : Diagnostic d'exhaustivité des données"),
-            tags$li("Section 3 : Tableaux de fréquences et statistiques descriptives (normes francophones)"),
-            tags$li("Section 4 : Comparaisons bivariées et tests d'hypothèses")
+            tags$li("Section 2 : Diagnostic d'exhaustivité et valeurs manquantes"),
+            tags$li("Section 3 : Tableaux de fréquences et statistiques descriptives univariées"),
+            tags$li("Section 4 : Comparaisons bivariées et régression logistique (Odds Ratios)"),
+            tags$li("Section 5 : Échelles de Likert et réponses multiples")
           ),
           tags$div(
             class = "alert alert-success mt-4",
@@ -69,7 +72,7 @@ mod_export_ui <- function(id) {
   )
 }
 
-mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive) {
+mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive, spec_reactive) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
@@ -79,21 +82,20 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
     
     output$download_word <- downloadHandler(
       filename = function() {
-        paste0("Rapport_Analytix_", format(Sys.Date(), "%Y%m%d"), ".docx")
+        paste0("Rapport_Analytix_Complet_", format(Sys.Date(), "%Y%m%d"), ".docx")
       },
       content = function(file) {
-        shiny::withProgress(message = 'Génération du rapport Word en cours...', value = 0, {
+        shiny::withProgress(message = 'Génération du rapport Word global...', value = 0, {
           
           df <- data_reactive()
           shiny::incProgress(0.2, detail = "Initialisation du document...")
           
-          # Initialize officer doc
           doc <- officer::read_docx()
           
           # Title section
           doc <- officer::body_add_par(doc, input$report_title, style = "Title")
           doc <- officer::body_add_par(doc, input$report_subtitle, style = "Subtitle")
-          doc <- officer::body_add_par(doc, paste("Auteur :", input$report_author, "| Date :", Sys.Date()), style = "Normal")
+          doc <- officer::body_add_par(doc, paste("Auteur :", input$report_author, "| Organisme :", input$report_institution, "| Date :", Sys.Date()), style = "Normal")
           doc <- officer::body_add_par(doc, "", style = "Normal")
           
           shiny::incProgress(0.4, detail = "Ajout de la synthèse des données...")
@@ -105,8 +107,7 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               Indicateur = c("Nombre total d'observations", "Nombre de variables", "Taux global d'exhaustivité"),
               Valeur = c(nrow(df), ncol(df), paste0(round((1 - sum(is.na(df))/(nrow(df)*ncol(df)))*100, 1), "%"))
             )
-            ft_meta <- flextable::flextable(meta_df)
-            ft_meta <- flextable::theme_vanilla(ft_meta)
+            ft_meta <- flextable::theme_vanilla(flextable::flextable(meta_df))
             doc <- flextable::body_add_flextable(doc, ft_meta)
             doc <- officer::body_add_par(doc, "", style = "Normal")
           }
@@ -123,8 +124,7 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               if (inherits(u_res$table, "flextable")) {
                 doc <- flextable::body_add_flextable(doc, u_res$table)
               } else if (is.data.frame(u_res$table)) {
-                ft_u <- flextable::flextable(u_res$table)
-                ft_u <- flextable::theme_vanilla(ft_u)
+                ft_u <- flextable::theme_vanilla(flextable::flextable(u_res$table))
                 doc <- flextable::body_add_flextable(doc, ft_u)
               }
               doc <- officer::body_add_par(doc, "", style = "Normal")
@@ -143,9 +143,22 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               if (inherits(b_res$res, "flextable")) {
                 doc <- flextable::body_add_flextable(doc, b_res$res)
               } else if (is.data.frame(b_res$res)) {
-                ft_b <- flextable::flextable(b_res$res)
-                ft_b <- flextable::theme_vanilla(ft_b)
+                ft_b <- flextable::theme_vanilla(flextable::flextable(b_res$res))
                 doc <- flextable::body_add_flextable(doc, ft_b)
+              }
+              doc <- officer::body_add_par(doc, "", style = "Normal")
+            }
+          }
+          
+          # 4. Specialized Section
+          if (isTRUE(input$inc_spec)) {
+            s_res <- tryCatch(spec_reactive(), error = function(e) NULL)
+            if (!is.null(s_res)) {
+              doc <- officer::body_add_par(doc, "4. Analyses Spécialisées", style = "heading 1")
+              if (!is.null(s_res$likert)) {
+                doc <- officer::body_add_par(doc, "Échelle de Likert", style = "heading 2")
+                if (inherits(s_res$likert, "flextable")) doc <- flextable::body_add_flextable(doc, s_res$likert)
+                else if (is.data.frame(s_res$likert)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$likert)))
               }
             }
           }

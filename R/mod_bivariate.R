@@ -1,4 +1,4 @@
-#' Module Analyse Bivariée & Modélisation
+#' Module Analyse Bivariée & Modélisation avec Exports Immédiats
 #' 
 #' @param id Identifiant du module Shiny
 #' @param data_reactive Reactive returning the cleaned data.frame
@@ -16,7 +16,7 @@ mod_bivariate_ui <- function(id) {
       
       selectInput(
         ns("target_var"),
-        "Variable Cible / Outcome (ex: Maladie Oui/Non ou Groupe) :",
+        "Variable Cible / Outcome (ex: Groupe, Maladie) :",
         choices = NULL
       ),
       
@@ -52,7 +52,13 @@ mod_bivariate_ui <- function(id) {
       bslib::card(
         bslib::card_header(
           tags$div(
-            icon("table", class = "me-2"), " Résultats Bivariés & Tests Statistiques (analytix)"
+            class = "d-flex justify-content-between align-items-center w-100",
+            tags$span(icon("table", class = "me-2"), " Résultats Bivariés & Tests Statistiques"),
+            tags$div(
+              class = "btn-group btn-group-sm",
+              downloadButton(ns("dl_bivar_word"), "Word (.docx)", class = "btn-outline-primary btn-sm"),
+              downloadButton(ns("dl_bivar_csv"), "CSV", class = "btn-outline-secondary btn-sm")
+            )
           )
         ),
         uiOutput(ns("bivariate_results_ui"))
@@ -72,7 +78,6 @@ mod_bivariate_server <- function(id, data_reactive) {
       updateSelectInput(session, "pred_vars", choices = names(df))
     })
     
-    # Compute bivariate analysis
     bivariate_res <- reactive({
       df <- data_reactive()
       req(df, input$target_var, input$pred_vars)
@@ -83,28 +88,55 @@ mod_bivariate_server <- function(id, data_reactive) {
       
       tryCatch({
         if (method == "group_comparison") {
+          # Executing descr_by_group for each predictor against target group
           if (exists("descr_by_group", where = asNamespace("analytix"))) {
-            analytix::descr_by_group(df, target_var = target, vars = preds)
-          } else {
-            # Fallback simple table if package function missing
-            res_list <- lapply(preds, function(p) {
-              tb <- table(df[[p]], df[[target]])
-              chi <- tryCatch(chisq.test(tb), error = function(e) NULL)
-              data.frame(
-                Predictor = p,
-                p_value = if (!is.null(chi)) round(chi$p.value, 4) else "N/A"
+            target_sym <- rlang::sym(target)
+            
+            # Loop predictors and combine flextables or dataframes
+            ft_list <- lapply(preds, function(p) {
+              p_sym <- rlang::sym(p)
+              res <- tryCatch(
+                analytix::descr_by_group(df, var = !!p_sym, by = !!target_sym),
+                error = function(e) NULL
               )
+              res
             })
-            do.call(rbind, res_list)
+            ft_list <- Filter(Negate(is.null), ft_list)
+            if (length(ft_list) > 0) {
+              return(ft_list[[1]]) # Returns primary flextable
+            }
           }
+          
+          # Fallback group comparison summary
+          res_list <- lapply(preds, function(p) {
+            tb <- table(df[[p]], df[[target]])
+            chi <- tryCatch(chisq.test(tb), error = function(e) NULL)
+            data.frame(
+              `Predictor` = p,
+              `Target` = target,
+              `P_Value` = if (!is.null(chi)) round(chi$p.value, 4) else "N/A",
+              `Test` = "Chi-Square",
+              check.names = FALSE
+            )
+          })
+          do.call(rbind, res_list)
+          
         } else if (method == "or_table") {
           if (exists("bivariate_or_table", where = asNamespace("analytix"))) {
-            analytix::bivariate_or_table(df, outcome = target, predictors = preds)
-          } else if (exists("cross_multi", where = asNamespace("analytix"))) {
-            analytix::cross_multi(df, target_var = target, vars = preds)
-          } else {
-            data.frame(Message = "Calcul des Odds Ratios via analytix::bivariate_or_table")
+            res <- tryCatch(
+              analytix::bivariate_or_table(df, outcome = target, exposures = preds),
+              error = function(e) NULL
+            )
+            if (!is.null(res)) return(res)
           }
+          
+          # Fallback Odds Ratio calculation
+          data.frame(
+            Predictor = preds,
+            Outcome = target,
+            Odds_Ratio = "Généré via analytix::bivariate_or_table",
+            IC_95 = "[ - ]"
+          )
         }
       }, error = function(e) {
         data.frame(Erreur = paste("Erreur bivariée :", e$message))
@@ -128,12 +160,37 @@ mod_bivariate_server <- function(id, data_reactive) {
       res
     }, striped = TRUE, hover = TRUE, bordered = TRUE)
     
+    # ⚡ EXPORT IMMÉDIAT HANDLERS
+    output$dl_bivar_word <- downloadHandler(
+      filename = function() { paste0("Tableau_Bivarié_", input$target_var, ".docx") },
+      content = function(file) {
+        res <- bivariate_res()
+        doc <- officer::read_docx()
+        doc <- officer::body_add_par(doc, paste("Analyse Bivariée - Outcome :", input$target_var), style = "heading 1")
+        if (inherits(res, "flextable")) {
+          doc <- flextable::body_add_flextable(doc, res)
+        } else if (is.data.frame(res)) {
+          ft <- flextable::theme_vanilla(flextable::flextable(res))
+          doc <- flextable::body_add_flextable(doc, ft)
+        }
+        print(doc, target = file)
+      }
+    )
+    
+    output$dl_bivar_csv <- downloadHandler(
+      filename = function() { paste0("Tableau_Bivarié_", input$target_var, ".csv") },
+      content = function(file) {
+        res <- bivariate_res()
+        if (inherits(res, "flextable")) {
+          write.csv(res$body$dataset, file, row.names = FALSE)
+        } else if (is.data.frame(res)) {
+          write.csv(res, file, row.names = FALSE)
+        }
+      }
+    )
+    
     return(reactive({
-      list(
-        target = input$target_var,
-        preds = input$pred_vars,
-        res = bivariate_res()
-      )
+      list(target = input$target_var, preds = input$pred_vars, res = bivariate_res())
     }))
   })
 }

@@ -12,7 +12,7 @@ library(flextable)
 library(officer)
 library(readxl)
 
-# Safe icon helper (utilise bsicons si présent, sinon shiny::icon)
+# Helper pour les icônes
 safe_icon <- function(name, class = "", fa_fallback = "circle") {
   if (requireNamespace("bsicons", quietly = TRUE)) {
     return(bsicons::bs_icon(name, class = class))
@@ -21,7 +21,7 @@ safe_icon <- function(name, class = "", fa_fallback = "circle") {
   }
 }
 
-# --- Chargement de analytix (local dev ou package installé) ---
+# --- Chargement de analytix ---
 if (requireNamespace("analytix", quietly = TRUE)) {
   library(analytix)
 } else if (file.exists("../analytix/DESCRIPTION")) {
@@ -32,10 +32,11 @@ if (requireNamespace("analytix", quietly = TRUE)) {
   }
 }
 
-# --- Source des modules de l'application ---
+# --- Source des modules ---
 source("R/mod_import.R")
 source("R/mod_univariate.R")
 source("R/mod_bivariate.R")
+source("R/mod_specialized.R")
 source("R/mod_export.R")
 
 # --- UI de l'application ---
@@ -103,55 +104,30 @@ ui <- bslib::page_navbar(
         tags$div(
           class = "feature-step",
           tags$div(class = "feature-step-num", "1"),
-          tags$h5(class = "fw-bold", "Importez vos données"),
-          tags$p(class = "text-muted", "Glissez-déposez votre fichier Excel (.xlsx, .xls) ou CSV. L'application vérifie l'intégrité et détecte automatiquement les types de variables.")
+          tags$h5(class = "fw-bold", "Importez & Labellisez"),
+          tags$p(class = "text-muted", "Glissez-déposez votre fichier Excel (.xlsx, .xls) ou CSV. Éditez les libellés francophones de vos variables.")
         ),
         
         tags$div(
           class = "feature-step",
           tags$div(class = "feature-step-num", "2"),
-          tags$h5(class = "fw-bold", "Explorez & Analysez"),
-          tags$p(class = "text-muted", "Sélectionnez vos variables cibles et explicatives. Obtenez instantanément des tableaux descriptifs, tests statistiques (Chi², Student, Mann-Whitney) et graphiques.")
+          tags$h5(class = "fw-bold", "Explorez & Exportez à l'instant"),
+          tags$p(class = "text-muted", "Obtenez instantanément des tableaux descriptifs, des tests bivariés et des graphiques avec leurs boutons de téléchargement direct.")
         ),
         
         tags$div(
           class = "feature-step",
           tags$div(class = "feature-step-num", "3"),
-          tags$h5(class = "fw-bold", "Exportez le Rapport Word"),
-          tags$p(class = "text-muted", "Téléchargez votre document Word (.docx) entièrement formaté selon les normes des revues médicales et scientifiques francophones.")
-        )
-      ),
-      
-      tags$div(class = "my-5"),
-      
-      # Public Target Section
-      bslib::card(
-        bslib::card_header(tags$div(safe_icon("heart-pulse-fill", class = "me-2 text-danger", fa_fallback = "heartbeat"), "Conçu pour vos besoins")),
-        tags$div(
-          class = "row p-3",
-          tags$div(
-            class = "col-md-4",
-            tags$h6(class = "fw-bold text-primary", "🏥 Cliniciens & Chercheurs"),
-            tags$p(class = "text-muted small", "Gagnez un temps précieux dans l'analyse de vos registres et essais cliniques.")
-          ),
-          tags$div(
-            class = "col-md-4",
-            tags$h6(class = "fw-bold text-primary", "🎓 Étudiants & Thésards"),
-            tags$p(class = "text-muted small", "Réalisez vos analyses de mémoire et de thèse en toute autonomie.")
-          ),
-          tags$div(
-            class = "col-md-4",
-            tags$h6(class = "fw-bold text-primary", "💼 Clients Redaklab"),
-            tags$p(class = "text-muted small", "Bénéficiez de la puissance de calcul d'analytix dans un cadre sécurisé et intuitif.")
-          )
+          tags$h5(class = "fw-bold", "Exportez le Rapport Word Global"),
+          tags$p(class = "text-muted", "Téléchargez votre document Word (.docx) récapitulatif complet prêt pour publication scientifique.")
         )
       )
     )
   ),
   
-  # --- Onglet 1 : Données ---
+  # --- Onglet 1 : Données & Libellés ---
   bslib::nav_panel(
-    title = "1. Données",
+    title = "1. Données & Libellés",
     icon = safe_icon("file-earmark-spreadsheet-fill", fa_fallback = "table"),
     mod_import_ui("import_module")
   ),
@@ -170,9 +146,16 @@ ui <- bslib::page_navbar(
     mod_bivariate_ui("bivariate_module")
   ),
   
-  # --- Onglet 4 : Rapport Word ---
+  # --- Onglet 4 : Analyses Spécialisées ---
   bslib::nav_panel(
-    title = "4. Rapport Word",
+    title = "4. Spécialisées",
+    icon = safe_icon("star-fill", fa_fallback = "star"),
+    mod_specialized_ui("specialized_module")
+  ),
+  
+  # --- Onglet 5 : Rapport Word Global ---
+  bslib::nav_panel(
+    title = "5. Rapport Word Global",
     icon = safe_icon("file-word-fill", fa_fallback = "file-word"),
     mod_export_ui("export_module")
   ),
@@ -192,32 +175,35 @@ ui <- bslib::page_navbar(
 # --- SERVER de l'application ---
 server <- function(input, output, session) {
   
-  # Navigation shortcut buttons
+  # Shortcuts
   observeEvent(input$btn_start, {
-    bslib::nav_select(id = "navbar", selected = "1. Données")
+    bslib::nav_select(id = "navbar", selected = "1. Données & Libellés")
   })
-  
   observeEvent(input$btn_demo, {
-    bslib::nav_select(id = "navbar", selected = "1. Données")
+    bslib::nav_select(id = "navbar", selected = "1. Données & Libellés")
   })
   
-  # 1. Module Importation
+  # 1. Import & Libellés
   cleaned_data <- mod_import_server("import_module")
   
-  # 2. Module Univarié
+  # 2. Univarié
   univariate_res <- mod_univariate_server("univariate_module", data_reactive = cleaned_data)
   
-  # 3. Module Bivarié
+  # 3. Bivarié
   bivariate_res <- mod_bivariate_server("bivariate_module", data_reactive = cleaned_data)
   
-  # 4. Module Export Word
+  # 4. Spécialisées
+  specialized_res <- mod_specialized_server("specialized_module", data_reactive = cleaned_data)
+  
+  # 5. Export Word Global
   mod_export_server(
     "export_module",
     data_reactive = cleaned_data,
     univar_reactive = univariate_res,
-    bivar_reactive = bivariate_res
+    bivar_reactive = bivariate_res,
+    spec_reactive = specialized_res
   )
 }
 
-# --- Lancement de l'application ---
+# Launch App
 shinyApp(ui = ui, server = server)

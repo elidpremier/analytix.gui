@@ -1,0 +1,210 @@
+#' Module Analyses Spécialisées (Likert, Choix Multiples, Heatmap)
+#' 
+#' @param id Identifiant du module Shiny
+#' @param data_reactive Reactive returning the cleaned data.frame
+
+mod_specialized_ui <- function(id) {
+  ns <- NS(id)
+  
+  bslib::navset_card_tab(
+    # Tab 1: Likert Scale
+    bslib::nav_panel(
+      title = tags$span(icon("star"), " Échelles de Likert"),
+      bslib::layout_sidebar(
+        sidebar = bslib::sidebar(
+          title = "Configuration Likert",
+          selectInput(ns("likert_var"), "Variable Likert :", choices = NULL),
+          width = 300
+        ),
+        bslib::card(
+          bslib::card_header(
+            tags$div(
+              class = "d-flex justify-content-between align-items-center w-100",
+              tags$span(icon("table", class = "me-2"), " Résumé Échelle de Likert"),
+              downloadButton(ns("dl_likert_word"), "Word (.docx)", class = "btn-outline-primary btn-sm")
+            )
+          ),
+          uiOutput(ns("likert_ui"))
+        )
+      )
+    ),
+    
+    # Tab 2: Multiple Choice
+    bslib::nav_panel(
+      title = tags$span(icon("list-check"), " Choix Multiples"),
+      bslib::layout_sidebar(
+        sidebar = bslib::sidebar(
+          title = "Questions Multiples",
+          selectInput(ns("multi_vars"), "Colonnes composant la question :", choices = NULL, multiple = TRUE),
+          width = 300
+        ),
+        bslib::card(
+          bslib::card_header(
+            tags$div(
+              class = "d-flex justify-content-between align-items-center w-100",
+              tags$span(icon("table", class = "me-2"), " Analyse des Réponses Multiples"),
+              downloadButton(ns("dl_multi_word"), "Word (.docx)", class = "btn-outline-primary btn-sm")
+            )
+          ),
+          uiOutput(ns("multi_ui"))
+        )
+      )
+    ),
+    
+    # Tab 3: Heatmap Correlation Matrix
+    bslib::nav_panel(
+      title = tags$span(icon("th"), " Heatmap & Corrélations"),
+      bslib::layout_sidebar(
+        sidebar = bslib::sidebar(
+          title = "Variables Numériques",
+          selectInput(ns("heatmap_vars"), "Sélectionner les variables (min 2) :", choices = NULL, multiple = TRUE),
+          width = 300
+        ),
+        bslib::card(
+          bslib::card_header(
+            tags$div(
+              class = "d-flex justify-content-between align-items-center w-100",
+              tags$span(icon("image", class = "me-2"), " Carte Thermique des Corrélations"),
+              tags$div(
+                class = "btn-group btn-group-sm",
+                downloadButton(ns("dl_hm_png"), "PNG", class = "btn-outline-success btn-sm"),
+                downloadButton(ns("dl_hm_pdf"), "PDF", class = "btn-outline-danger btn-sm")
+              )
+            )
+          ),
+          plotOutput(ns("heatmap_plot"), height = "450px")
+        )
+      )
+    )
+  )
+}
+
+mod_specialized_server <- function(id, data_reactive) {
+  moduleServer(id, function(input, output, session) {
+    ns <- session$ns
+    
+    observe({
+      df <- data_reactive()
+      req(df)
+      updateSelectInput(session, "likert_var", choices = names(df))
+      updateSelectInput(session, "multi_vars", choices = names(df))
+      num_cols <- names(df)[sapply(df, is.numeric)]
+      updateSelectInput(session, "heatmap_vars", choices = num_cols, selected = head(num_cols, 4))
+    })
+    
+    # 1. Likert logic
+    likert_res <- reactive({
+      df <- data_reactive()
+      req(df, input$likert_var)
+      var_nm <- input$likert_var
+      sym_v <- rlang::sym(var_nm)
+      
+      if (exists("descr_likert", where = asNamespace("analytix"))) {
+        res <- tryCatch(analytix::descr_likert(df, var = !!sym_v), error = function(e) NULL)
+        if (!is.null(res)) return(res)
+      }
+      
+      # Fallback Likert summary
+      tb <- table(df[[var_nm]], useNA = "no")
+      data.frame(Modalite = names(tb), Effectif = as.numeric(tb), Pourcentage = paste0(round(prop.table(tb)*100, 1), "%"))
+    })
+    
+    output$likert_ui <- renderUI({
+      res <- likert_res()
+      req(res)
+      if (inherits(res, "flextable")) {
+        htmltools::HTML(flextable::htmltools_value(res))
+      } else if (is.data.frame(res)) {
+        tableOutput(ns("raw_likert"))
+      }
+    })
+    output$raw_likert <- renderTable({ likert_res() }, striped = TRUE, hover = TRUE)
+    
+    # 2. Multi choice logic
+    multi_res <- reactive({
+      df <- data_reactive()
+      req(df, input$multi_vars)
+      vars <- input$multi_vars
+      
+      if (exists("descr_multi_choice", where = asNamespace("analytix"))) {
+        res <- tryCatch(analytix::descr_multi_choice(df, vars = vars), error = function(e) NULL)
+        if (!is.null(res)) return(res)
+      }
+      
+      counts <- sapply(df[vars], function(x) sum(x == 1 | x == "Oui" | x == TRUE, na.rm = TRUE))
+      data.frame(Option = vars, Citations = counts, `% Participants` = paste0(round(counts/nrow(df)*100, 1), "%"), check.names = FALSE)
+    })
+    
+    output$multi_ui <- renderUI({
+      res <- multi_res()
+      req(res)
+      if (inherits(res, "flextable")) {
+        htmltools::HTML(flextable::htmltools_value(res))
+      } else if (is.data.frame(res)) {
+        tableOutput(ns("raw_multi"))
+      }
+    })
+    output$raw_multi <- renderTable({ multi_res() }, striped = TRUE, hover = TRUE)
+    
+    # 3. Heatmap logic
+    current_hm_plot <- reactive({
+      df <- data_reactive()
+      req(df, input$heatmap_vars, length(input$heatmap_vars) >= 2)
+      vars <- input$heatmap_vars
+      
+      if (exists("plot_heatmap_matrix", where = asNamespace("analytix"))) {
+        p <- tryCatch(analytix::plot_heatmap_matrix(df, vars = vars), error = function(e) NULL)
+        if (!is.null(p) && inherits(p, "ggplot")) return(p)
+      }
+      
+      sub_df <- na.omit(df[vars])
+      cm <- cor(sub_df)
+      df_cm <- as.data.frame(as.table(cm))
+      
+      ggplot2::ggplot(df_cm, ggplot2::aes(x = Var1, y = Var2, fill = Freq)) +
+        ggplot2::geom_tile(color = "white") +
+        ggplot2::scale_fill_gradient2(low = "#0284c7", high = "#e11d48", mid = "white", midpoint = 0, limit = c(-1,1)) +
+        ggplot2::theme_minimal(base_size = 14) +
+        ggplot2::labs(title = "Matrice de Corrélations", x = "", y = "")
+    })
+    
+    output$heatmap_plot <- renderPlot({ current_hm_plot() })
+    
+    # ⚡ EXPORT IMMÉDIAT HANDLERS
+    output$dl_likert_word <- downloadHandler(
+      filename = function() { paste0("Likert_", input$likert_var, ".docx") },
+      content = function(file) {
+        doc <- officer::read_docx()
+        res <- likert_res()
+        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
+        print(doc, target = file)
+      }
+    )
+    
+    output$dl_multi_word <- downloadHandler(
+      filename = function() { paste0("Choix_Multiples.docx") },
+      content = function(file) {
+        doc <- officer::read_docx()
+        res <- multi_res()
+        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
+        print(doc, target = file)
+      }
+    )
+    
+    output$dl_hm_png <- downloadHandler(
+      filename = function() { "Heatmap_Correlations.png" },
+      content = function(file) { ggplot2::ggsave(file, plot = current_hm_plot(), width = 8, height = 6, dpi = 300) }
+    )
+    
+    output$dl_hm_pdf <- downloadHandler(
+      filename = function() { "Heatmap_Correlations.pdf" },
+      content = function(file) { ggplot2::ggsave(file, plot = current_hm_plot(), width = 8, height = 6) }
+    )
+    
+    return(reactive({
+      list(likert = likert_res(), multi = multi_res(), heatmap = current_hm_plot())
+    }))
+  })
+}

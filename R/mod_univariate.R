@@ -1,4 +1,4 @@
-#' Module Analyse Univariée
+#' Module Analyse Univariée avec Exports Immédiats
 #' 
 #' @param id Identifiant du module Shiny
 #' @param data_reactive Reactive returning the cleaned data.frame
@@ -41,7 +41,7 @@ mod_univariate_ui <- function(id) {
         class = "alert alert-info py-2 px-3",
         style = "font-size: 0.85rem;",
         icon("info-circle", class = "me-1"),
-        "Astuce : le package analytix adapte automatiquement les statistiques (Moyenne ± SD vs Médiane [IQR]) selon la distribution."
+        "Le package analytix adapte automatiquement les statistiques (Moyenne ± SD vs Médiane [IQR]) selon la distribution."
       )
     ),
     
@@ -51,21 +51,33 @@ mod_univariate_ui <- function(id) {
       bslib::layout_column_wrap(
         width = 1/2,
         
-        # Carte Tableau
+        # Carte Tableau avec Export Immédiat
         bslib::card(
           bslib::card_header(
             tags$div(
-              icon("table", class = "me-2"), " Tableau Descriptif Normé (analytix)"
+              class = "d-flex justify-content-between align-items-center w-100",
+              tags$span(icon("table", class = "me-2"), " Tableau Descriptif (analytix)"),
+              tags$div(
+                class = "btn-group btn-group-sm",
+                downloadButton(ns("dl_tab_word"), "Word (.docx)", class = "btn-outline-primary btn-sm"),
+                downloadButton(ns("dl_tab_csv"), "CSV", class = "btn-outline-secondary btn-sm")
+              )
             )
           ),
           uiOutput(ns("univariate_table_ui"))
         ),
         
-        # Carte Graphique
+        # Carte Graphique avec Export Immédiat
         bslib::card(
           bslib::card_header(
             tags$div(
-              icon("image", class = "me-2"), " Visualisation Graphique"
+              class = "d-flex justify-content-between align-items-center w-100",
+              tags$span(icon("image", class = "me-2"), " Graphique"),
+              tags$div(
+                class = "btn-group btn-group-sm",
+                downloadButton(ns("dl_plot_png"), "PNG", class = "btn-outline-success btn-sm"),
+                downloadButton(ns("dl_plot_pdf"), "PDF", class = "btn-outline-danger btn-sm")
+              )
             )
           ),
           plotOutput(ns("univariate_plot"), height = "420px")
@@ -79,14 +91,12 @@ mod_univariate_server <- function(id, data_reactive) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
-    # Update choices on data change
     observe({
       df <- data_reactive()
       req(df)
       updateSelectInput(session, "select_var", choices = names(df))
     })
     
-    # Determine type
     effective_type <- reactive({
       df <- data_reactive()
       req(df, input$select_var)
@@ -98,7 +108,6 @@ mod_univariate_server <- function(id, data_reactive) {
         return(input$analysis_type)
       }
       
-      # Auto detection logic
       if (is.numeric(col)) {
         if (length(unique(na.omit(col))) <= 2) return("binary")
         return("numeric")
@@ -118,18 +127,18 @@ mod_univariate_server <- function(id, data_reactive) {
       var_name <- input$select_var
       type <- effective_type()
       na.rm <- !isTRUE(input$include_na)
+      sym_var <- rlang::sym(var_name)
       
       tryCatch({
         if (type == "numeric" && exists("descr_numeric", where = asNamespace("analytix"))) {
-          analytix::descr_numeric(df, var_name)
+          analytix::descr_numeric(df, var = !!sym_var)
         } else if (type == "categorical" && exists("descr_categorial", where = asNamespace("analytix"))) {
-          analytix::descr_categorial(df, var_name, na.rm = na.rm)
+          analytix::descr_categorial(df, var = !!sym_var, na.rm = na.rm)
         } else if (type == "binary" && exists("descr_binary", where = asNamespace("analytix"))) {
-          analytix::descr_binary(df, var_name)
+          analytix::descr_binary(df, var = !!sym_var)
         } else if (type == "likert" && exists("descr_likert", where = asNamespace("analytix"))) {
-          analytix::descr_likert(df, var_name)
+          analytix::descr_likert(df, var = !!sym_var)
         } else {
-          # Fallback standard summary dataframe if function not available
           col <- df[[var_name]]
           if (is.numeric(col)) {
             data.frame(
@@ -156,11 +165,9 @@ mod_univariate_server <- function(id, data_reactive) {
       })
     })
     
-    # Render Table UI (Flextable HTML or table)
     output$univariate_table_ui <- renderUI({
       res <- res_table()
       req(res)
-      
       if (inherits(res, "flextable")) {
         htmltools::HTML(flextable::htmltools_value(res))
       } else if (is.data.frame(res)) {
@@ -175,50 +182,90 @@ mod_univariate_server <- function(id, data_reactive) {
     }, striped = TRUE, hover = TRUE, bordered = TRUE)
     
     # 2. Render Plot
-    output$univariate_plot <- renderPlot({
+    current_plot <- reactive({
       df <- data_reactive()
       req(df, input$select_var)
       
       var_name <- input$select_var
       type <- effective_type()
+      sym_var <- rlang::sym(var_name)
       
-      # Try analytix plot_distribution if available
       if (exists("plot_distribution", where = asNamespace("analytix"))) {
-        p <- try(analytix::plot_distribution(df, var_name), silent = TRUE)
+        p <- try(analytix::plot_distribution(df, var = !!sym_var), silent = TRUE)
         if (!inherits(p, "try-error") && inherits(p, "ggplot")) {
           return(p)
         }
       }
       
-      # Custom fallback ggplot2
       col <- df[[var_name]]
       if (type == "numeric") {
         ggplot2::ggplot(df, ggplot2::aes(x = .data[[var_name]])) +
           ggplot2::geom_histogram(fill = "#0284c7", color = "white", bins = 20, alpha = 0.85) +
           ggplot2::theme_minimal(base_size = 14) +
-          ggplot2::labs(
-            title = paste("Distribution de", var_name),
-            x = var_name, y = "Fréquence"
-          )
+          ggplot2::labs(title = paste("Distribution de", var_name), x = var_name, y = "Fréquence")
       } else {
         ggplot2::ggplot(df, ggplot2::aes(x = factor(.data[[var_name]]), fill = factor(.data[[var_name]]))) +
           ggplot2::geom_bar(alpha = 0.85, show.legend = FALSE) +
           ggplot2::scale_fill_brewer(palette = "Set2") +
           ggplot2::theme_minimal(base_size = 14) +
-          ggplot2::labs(
-            title = paste("Répartition des modalités de", var_name),
-            x = var_name, y = "Effectif"
-          ) +
+          ggplot2::labs(title = paste("Répartition de", var_name), x = var_name, y = "Effectif") +
           ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
       }
     })
     
+    output$univariate_plot <- renderPlot({
+      current_plot()
+    })
+    
+    # ⚡ EXPORT IMMÉDIAT HANDLERS
+    # Word Table
+    output$dl_tab_word <- downloadHandler(
+      filename = function() { paste0("Tableau_Univ_", input$select_var, ".docx") },
+      content = function(file) {
+        res <- res_table()
+        doc <- officer::read_docx()
+        doc <- officer::body_add_par(doc, paste("Tableau Univarié :", input$select_var), style = "heading 1")
+        if (inherits(res, "flextable")) {
+          doc <- flextable::body_add_flextable(doc, res)
+        } else if (is.data.frame(res)) {
+          ft <- flextable::theme_vanilla(flextable::flextable(res))
+          doc <- flextable::body_add_flextable(doc, ft)
+        }
+        print(doc, target = file)
+      }
+    )
+    
+    # CSV Table
+    output$dl_tab_csv <- downloadHandler(
+      filename = function() { paste0("Tableau_Univ_", input$select_var, ".csv") },
+      content = function(file) {
+        res <- res_table()
+        if (inherits(res, "flextable")) {
+          write.csv(res$body$dataset, file, row.names = FALSE)
+        } else if (is.data.frame(res)) {
+          write.csv(res, file, row.names = FALSE)
+        }
+      }
+    )
+    
+    # PNG Plot
+    output$dl_plot_png <- downloadHandler(
+      filename = function() { paste0("Graphique_Univ_", input$select_var, ".png") },
+      content = function(file) {
+        ggplot2::ggsave(file, plot = current_plot(), width = 8, height = 6, dpi = 300)
+      }
+    )
+    
+    # PDF Plot
+    output$dl_plot_pdf <- downloadHandler(
+      filename = function() { paste0("Graphique_Univ_", input$select_var, ".pdf") },
+      content = function(file) {
+        ggplot2::ggsave(file, plot = current_plot(), width = 8, height = 6)
+      }
+    )
+    
     return(reactive({
-      list(
-        var = input$select_var,
-        type = effective_type(),
-        table = res_table()
-      )
+      list(var = input$select_var, type = effective_type(), table = res_table(), plot = current_plot())
     }))
   })
 }
