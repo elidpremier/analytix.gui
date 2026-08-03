@@ -82,6 +82,50 @@ mod_import_ui <- function(id) {
         bslib::nav_panel(
           title = tags$span(icon("exclamation-triangle"), " Synthèse des Manquants"),
           uiOutput(ns("missing_summary_ui"))
+        ),
+
+        # Tab 5: Cleaning & Imputation
+        bslib::nav_panel(
+          title = tags$span(icon("magic"), " Nettoyage & Imputation"),
+          tags$div(
+            class = "p-3",
+            tags$h5(class = "fw-bold text-slate-800", "Imputation et Nettoyage des Données"),
+            tags$p(class = "text-muted", "Utilisez les puissants outils du package analytix pour nettoyer vos variables cliniques ou imputer les valeurs manquantes."),
+
+            bslib::layout_column_wrap(
+              width = 1/2,
+
+              bslib::card(
+                bslib::card_header(tags$div(icon("broom", class = "me-2"), "Nettoyage Rapide")),
+                selectInput(ns("clean_var_select"), "Variable à nettoyer/formater :", choices = NULL),
+                selectInput(ns("clean_type_select"), "Type de nettoyage :", choices = c(
+                  "Texte brut (Supprimer espaces, standariser NA)" = "text",
+                  "Binaire (Convertir en Oui/Non)" = "binary",
+                  "Numérique (Nettoyer les séparateurs)" = "numeric"
+                )),
+                actionButton(ns("btn_apply_clean"), "Appliquer le Nettoyage", class = "btn-primary btn-sm")
+              ),
+
+              bslib::card(
+                bslib::card_header(tags$div(icon("fill-drip", class = "me-2"), "Imputation Simple")),
+                selectInput(ns("impute_var_select"), "Variable à imputer :", choices = NULL),
+                selectInput(ns("impute_method_select"), "Méthode d'imputation :", choices = c(
+                  "Par le Mode (Qualitative / Catégorielle)" = "mode",
+                  "Par la Moyenne (Numérique Continue)" = "mean",
+                  "Par la Médiane (Numérique Continue)" = "median"
+                )),
+                actionButton(ns("btn_apply_impute"), "Appliquer l'Imputation", class = "btn-success btn-sm")
+              )
+            ),
+
+            tags$div(class = "mt-4"),
+
+            bslib::card(
+              bslib::card_header(tags$div(icon("cpu", class = "me-2"), "Imputation Multiple par Algorithme MICE (Global)")),
+              tags$p(class = "text-muted", "L'algorithme MICE (Multiple Imputation by Chained Equations) permet d'imputer l'ensemble des données manquantes du tableau de manière prédictive en se basant sur les corrélations de toutes les colonnes."),
+              actionButton(ns("btn_apply_mice"), "Lancer l'Imputation Globale MICE", class = "btn-warning btn-sm w-100")
+            )
+          )
         )
       )
     )
@@ -176,12 +220,94 @@ mod_import_server <- function(id) {
       cleaned_data(df)
     })
     
-    # Update outlier choices
+    # Update choices
     observe({
       df <- cleaned_data()
       req(df)
       num_cols <- names(df)[sapply(df, is.numeric)]
       updateSelectInput(session, "outlier_var", choices = num_cols)
+      updateSelectInput(session, "clean_var_select", choices = names(df))
+      updateSelectInput(session, "impute_var_select", choices = names(df))
+    })
+
+    # Observe Cleaning Event
+    observeEvent(input$btn_apply_clean, {
+      df <- cleaned_data()
+      req(df, input$clean_var_select)
+      var_nm <- input$clean_var_select
+      type <- input$clean_type_select
+
+      tryCatch({
+        if (type == "text" && exists("clean_text", where = asNamespace("analytix"))) {
+          df[[var_nm]] <- analytix::clean_text(df[[var_nm]])
+        } else if (type == "binary" && exists("clean_binary", where = asNamespace("analytix"))) {
+          df[[var_nm]] <- analytix::clean_binary(df[[var_nm]])
+        } else if (type == "numeric" && exists("clean_numeric", where = asNamespace("analytix"))) {
+          df[[var_nm]] <- analytix::clean_numeric(df[[var_nm]])
+        } else {
+          if (type == "text") {
+            df[[var_nm]] <- trimws(as.character(df[[var_nm]]))
+            df[[var_nm]][df[[var_nm]] %in% c("", "NA", "N/A", "null")] <- NA
+          } else if (type == "binary") {
+            df[[var_nm]] <- ifelse(tolower(trimws(as.character(df[[var_nm]]))) %in% c("oui", "yes", "true", "1"), "Oui", "Non")
+          } else if (type == "numeric") {
+            df[[var_nm]] <- as.numeric(gsub(",", ".", as.character(df[[var_nm]]), fixed = TRUE))
+          }
+        }
+        cleaned_data(df)
+        showNotification(paste("Nettoyage appliqué à la variable", var_nm), type = "message")
+      }, error = function(e) {
+        showNotification(paste("Erreur de nettoyage :", e$message), type = "error")
+      })
+    })
+
+    # Observe Imputation Event
+    observeEvent(input$btn_apply_impute, {
+      df <- cleaned_data()
+      req(df, input$impute_var_select)
+      var_nm <- input$impute_var_select
+      method <- input$impute_method_select
+
+      tryCatch({
+        if (method == "mode" && exists("impute_mode", where = asNamespace("analytix"))) {
+          df[[var_nm]] <- analytix::impute_mode(df[[var_nm]])
+        } else if (method %in% c("mean", "median") && exists("impute_mean", where = asNamespace("analytix"))) {
+          df[[var_nm]] <- analytix::impute_mean(df[[var_nm]], type = method)
+        } else {
+          if (method == "mode") {
+            tb <- table(df[[var_nm]], useNA = "no")
+            mode_val <- names(tb)[which.max(tb)]
+            df[[var_nm]][is.na(df[[var_nm]])] <- mode_val
+          } else {
+            val <- if (method == "mean") mean(df[[var_nm]], na.rm = TRUE) else median(df[[var_nm]], na.rm = TRUE)
+            df[[var_nm]][is.na(df[[var_nm]])] <- val
+          }
+        }
+        cleaned_data(df)
+        showNotification(paste("Imputation appliquée à la variable", var_nm), type = "message")
+      }, error = function(e) {
+        showNotification(paste("Erreur d'imputation :", e$message), type = "error")
+      })
+    })
+
+    # Observe MICE Event
+    observeEvent(input$btn_apply_mice, {
+      df <- cleaned_data()
+      req(df)
+
+      shiny::withProgress(message = "Lancement de l'imputation multiple MICE...", value = 0, {
+        tryCatch({
+          if (exists("impute_mice", where = asNamespace("analytix"))) {
+            df_imp <- analytix::impute_mice(df)
+            cleaned_data(df_imp)
+            showNotification("Imputation multiple globale MICE terminée avec succès !", type = "message")
+          } else {
+            showNotification("Fonction impute_mice non trouvée dans analytix.", type = "warning")
+          }
+        }, error = function(e) {
+          showNotification(paste("Erreur MICE :", e$message), type = "error")
+        })
+      })
     })
     
     # 4. Labels Editor UI
@@ -310,6 +436,14 @@ mod_import_server <- function(id) {
     output$missing_summary_ui <- renderUI({
       df <- cleaned_data()
       req(df)
+
+      if (exists("missing_report", where = asNamespace("analytix"))) {
+        report <- tryCatch(analytix::missing_report(df), error = function(e) NULL)
+        if (!is.null(report) && !is.null(report$flextable)) {
+          return(flextable::htmltools_value(report$flextable))
+        }
+      }
+
       na_counts <- sapply(df, function(x) sum(is.na(x)))
       na_pct <- round((na_counts / nrow(df)) * 100, 1)
       na_df <- data.frame(`Variable` = names(df), `Nombre de NA` = na_counts, `Proportion` = paste0(na_pct, " %"), check.names = FALSE)

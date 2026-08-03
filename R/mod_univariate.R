@@ -37,6 +37,9 @@ mod_univariate_ui <- function(id) {
       checkboxInput(ns("include_na"), "Inclure les valeurs manquantes (NA) dans les %", value = FALSE),
       
       tags$hr(),
+      uiOutput(ns("prevalence_box_ui")),
+
+      tags$hr(),
       tags$div(
         class = "alert alert-info py-2 px-3",
         style = "font-size: 0.85rem;",
@@ -270,6 +273,27 @@ mod_univariate_server <- function(id, data_reactive) {
       }
     )
     
+    # Prevalence Box
+    output$prevalence_box_ui <- renderUI({
+      df <- data_reactive()
+      req(df, input$select_var)
+      type <- effective_type()
+
+      if (type %in% c("binary", "categorical") && exists("calc_prevalence", where = asNamespace("analytix"))) {
+        sym_var <- rlang::sym(input$select_var)
+        res <- tryCatch(analytix::calc_prevalence(df, var = !!sym_var), error = function(e) NULL)
+
+        if (!is.null(res) && "Formate" %in% names(res)) {
+          tags$div(
+            class = "alert alert-success py-2 px-3 mt-2",
+            style = "font-size: 0.85rem;",
+            tags$strong(icon("calculator", class = "me-1"), "Prévalence / Proportion (IC 95%) :"),
+            tags$div(class = "mt-1 fw-bold", res$Formate)
+          )
+        }
+      }
+    })
+
     return(reactive({
       list(var = input$select_var, type = effective_type(), table = res_table(), plot = current_plot())
     }))
