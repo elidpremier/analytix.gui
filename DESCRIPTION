@@ -1,0 +1,30 @@
+Package: analytix.gui
+Title: Interface Web No-Code Shiny/Bslib pour le Package Analytix
+Version: 0.1.0
+Authors@R: 
+    person("IDO", "Esliée", role = c("aut", "cre"), email = "elidopremier@gmail.com")
+Author: IDO Esliée
+Maintainer: IDO Esliée <elidopremier@gmail.com>
+Description: Application web interactive no-code conçue pour les cliniciens, 
+    étudiants et clients de Redaklab. Permet l'importation de fichiers Excel ou CSV, 
+    l'analyse descriptive univariée et bivariée, la visualisation interactive, 
+    et l'exportation automatique de rapports Word (.docx) structurés via le 
+    package analytix.
+License: MIT
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports: 
+    shiny (>= 1.7.0),
+    bslib (>= 0.5.0),
+    bsicons (>= 0.1.0),
+    analytix,
+    readxl,
+    dplyr,
+    tidyr,
+    ggplot2,
+    flextable,
+    officer,
+    DT,
+    tools
+Suggests: 
+    testthat (>= 3.0.0)
