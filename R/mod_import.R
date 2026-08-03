@@ -35,6 +35,28 @@ mod_import_ui <- function(id) {
       checkboxInput(ns("trim_whitespace"), "Supprimer les espaces superflus (trim)", value = TRUE),
       
       tags$hr(),
+      tags$h6(icon("magic", class = "me-1"), "Nettoyage & Imputation Avancés"),
+      selectInput(ns("adv_clean_col"), "Choisir une colonne :", choices = NULL),
+      selectInput(ns("adv_clean_action"), "Action à appliquer :",
+                  choices = c(
+                    "Aucune" = "none",
+                    "Nettoyer en Texte (clean_text)" = "clean_text",
+                    "Nettoyer en Numérique (clean_numeric)" = "clean_numeric",
+                    "Nettoyer en Binaire (clean_binary)" = "clean_binary",
+                    "Imputer par le Mode (impute_mode)" = "impute_mode",
+                    "Imputer par la Moyenne (impute_mean)" = "impute_mean",
+                    "Imputer par la Médiane (impute_median)" = "impute_median"
+                  )),
+      actionButton(ns("apply_adv_clean"), "Appliquer l'Action", class = "btn btn-outline-primary btn-sm w-100 mb-2"),
+
+      tags$div(
+        class = "mt-2 p-2 border rounded bg-light",
+        tags$strong("Imputation Multiple (MICE) :"),
+        tags$p("Impute tout le jeu de données d'un coup.", class = "text-muted small mb-1"),
+        actionButton(ns("run_mice"), "Lancer MICE", class = "btn btn-primary btn-sm w-100")
+      ),
+
+      tags$hr(),
       tags$h6(icon("download", class = "me-1"), "Exporter les données"),
       downloadButton(ns("download_cleaned_csv"), "Télécharger CSV Nettoyé", class = "btn-outline-primary btn-sm w-100 mb-2"),
       
@@ -156,15 +178,24 @@ mod_import_server <- function(id) {
       showNotification("Données réinitialisées avec succès !", type = "message")
     })
 
-    observe({
-      df <- tryCatch(raw_data(), error = function(e) NULL)
+    # Initialize or reset cleaned_data when raw_data or standard cleaning checkboxes change
+    observeEvent({
+      raw_data()
+      input$clean_colnames
+      input$trim_whitespace
+    }, {
+      df <- raw_data()
       req(df)
       
       if (isTRUE(input$clean_colnames)) {
-        names(df) <- gsub("[^a-zA-Z0-9_]", "_", names(df))
-        names(df) <- gsub("_+", "_", names(df))
-        names(df) <- gsub("^_|_$", "", names(df))
-        names(df) <- tolower(names(df))
+        if (exists("clean_names", where = asNamespace("analytix"))) {
+          df <- analytix::clean_names(df)
+        } else {
+          names(df) <- gsub("[^a-zA-Z0-9_]", "_", names(df))
+          names(df) <- gsub("_+", "_", names(df))
+          names(df) <- gsub("^_|_$", "", names(df))
+          names(df) <- tolower(names(df))
+        }
       }
       
       if (isTRUE(input$trim_whitespace)) {
@@ -176,12 +207,93 @@ mod_import_server <- function(id) {
       cleaned_data(df)
     })
     
-    # Update outlier choices
+    # Update selectors whenever cleaned_data changes
     observe({
       df <- cleaned_data()
       req(df)
       num_cols <- names(df)[sapply(df, is.numeric)]
       updateSelectInput(session, "outlier_var", choices = num_cols)
+      updateSelectInput(session, "adv_clean_col", choices = names(df))
+    })
+
+    # Advanced Nettoyage & Imputation Handlers
+    observeEvent(input$apply_adv_clean, {
+      df <- cleaned_data()
+      req(df, input$adv_clean_col)
+      action <- input$adv_clean_action
+      col_name <- input$adv_clean_col
+
+      if (action == "none") {
+        return()
+      }
+
+      tryCatch({
+        new_col <- df[[col_name]]
+        if (action == "clean_text") {
+          if (exists("clean_text", where = asNamespace("analytix"))) {
+            new_col <- analytix::clean_text(new_col)
+          } else {
+            new_col <- trimws(as.character(new_col))
+            new_col[new_col %in% c("", "NA", "N/A", "<NA>", "NULL")] <- NA
+          }
+        } else if (action == "clean_numeric") {
+          if (exists("clean_numeric", where = asNamespace("analytix"))) {
+            new_col <- analytix::clean_numeric(new_col)
+          } else {
+            new_col <- as.numeric(gsub(",", ".", as.character(new_col)))
+          }
+        } else if (action == "clean_binary") {
+          if (exists("clean_binary", where = asNamespace("analytix"))) {
+            new_col <- analytix::clean_binary(new_col)
+          } else {
+            new_col <- factor(ifelse(tolower(as.character(new_col)) %in% c("oui", "yes", "1", "true"), "Oui", "Non"), levels = c("Oui", "Non"))
+          }
+        } else if (action == "impute_mode") {
+          if (exists("impute_mode", where = asNamespace("analytix"))) {
+            new_col <- analytix::impute_mode(new_col)
+          } else {
+            ux <- unique(new_col[!is.na(new_col)])
+            mode_val <- ux[which.max(tabulate(match(new_col, ux)))]
+            new_col[is.na(new_col)] <- mode_val
+          }
+        } else if (action == "impute_mean") {
+          if (exists("impute_mean", where = asNamespace("analytix"))) {
+            new_col <- analytix::impute_mean(new_col, type = "mean")
+          } else {
+            new_col[is.na(new_col)] <- mean(new_col, na.rm = TRUE)
+          }
+        } else if (action == "impute_median") {
+          if (exists("impute_mean", where = asNamespace("analytix"))) {
+            new_col <- analytix::impute_mean(new_col, type = "median")
+          } else {
+            new_col[is.na(new_col)] <- median(new_col, na.rm = TRUE)
+          }
+        }
+
+        df[[col_name]] <- new_col
+        cleaned_data(df)
+        showNotification(paste0("Action '", action, "' appliquée avec succès sur '", col_name, "' !"), type = "message")
+      }, error = function(e) {
+        showNotification(paste("Erreur de nettoyage :", e$message), type = "error")
+      })
+    })
+
+    observeEvent(input$run_mice, {
+      df <- cleaned_data()
+      req(df)
+      shiny::withProgress(message = "Imputation multiple (MICE)...", value = 0.5, {
+        tryCatch({
+          if (exists("impute_mice", where = asNamespace("analytix"))) {
+            imp_df <- analytix::impute_mice(df)
+            cleaned_data(imp_df)
+            showNotification("Imputation MICE exécutée avec succès !", type = "message")
+          } else {
+            showNotification("MICE non disponible dans le package.", type = "warning")
+          }
+        }, error = function(e) {
+          showNotification(paste("Erreur MICE :", e$message), type = "error")
+        })
+      })
     })
     
     # 4. Labels Editor UI
@@ -310,10 +422,38 @@ mod_import_server <- function(id) {
     output$missing_summary_ui <- renderUI({
       df <- cleaned_data()
       req(df)
+      bslib::layout_column_wrap(
+        width = 1/2,
+        bslib::card(
+          bslib::card_header(tags$div(class = "fw-bold", icon("table", class = "me-2"), "Tableau des Valeurs Manquantes")),
+          tableOutput(ns("missing_table"))
+        ),
+        bslib::card(
+          bslib::card_header(tags$div(class = "fw-bold", icon("image", class = "me-2"), "Carte Visuelle des Manquants")),
+          plotOutput(ns("missing_map_plot"), height = "450px")
+        )
+      )
+    })
+
+    output$missing_table <- renderTable({
+      df <- cleaned_data()
+      req(df)
       na_counts <- sapply(df, function(x) sum(is.na(x)))
       na_pct <- round((na_counts / nrow(df)) * 100, 1)
       na_df <- data.frame(`Variable` = names(df), `Nombre de NA` = na_counts, `Proportion` = paste0(na_pct, " %"), check.names = FALSE)
-      renderTable(na_df[order(-na_counts), ], striped = TRUE, hover = TRUE)
+      na_df[order(-na_counts), ]
+    }, striped = TRUE, hover = TRUE)
+
+    output$missing_map_plot <- renderPlot({
+      df <- cleaned_data()
+      req(df)
+      if (exists("plot_missing_map", where = asNamespace("analytix"))) {
+        analytix::plot_missing_map(df)
+      } else {
+        ggplot2::ggplot() +
+          ggplot2::labs(title = "Graphique non disponible") +
+          ggplot2::theme_void()
+      }
     })
     
     # Download cleaned CSV handler

@@ -28,7 +28,10 @@ mod_export_ui <- function(id) {
       checkboxInput(ns("inc_missing"), " Rapport sur les Données Manquantes", value = TRUE),
       checkboxInput(ns("inc_univar"), " Analyses Univariées", value = TRUE),
       checkboxInput(ns("inc_bivar"), " Analyses Bivariées", value = TRUE),
+      checkboxInput(ns("inc_multiv"), " Régression Logistique Multivariée", value = TRUE),
       checkboxInput(ns("inc_spec"), " Analyses Spécialisées (Likert, Multi-choix)", value = TRUE),
+      checkboxInput(ns("inc_cor"), " Matrice de Corrélations complète", value = TRUE),
+      checkboxInput(ns("inc_diag"), " Performance Diagnostique", value = TRUE),
       
       tags$hr(),
       downloadButton(
@@ -56,10 +59,10 @@ mod_export_ui <- function(id) {
           tags$h5("Sommaire des Tableaux & Figures qui seront générés :"),
           tags$ul(
             tags$li("Section 1 : Caractéristiques de la population d'étude"),
-            tags$li("Section 2 : Diagnostic d'exhaustivité et valeurs manquantes"),
-            tags$li("Section 3 : Tableaux de fréquences et statistiques descriptives univariées"),
-            tags$li("Section 4 : Comparaisons bivariées et régression logistique (Odds Ratios)"),
-            tags$li("Section 5 : Échelles de Likert et réponses multiples")
+            tags$li("Section 2 : Diagnostic d'exhaustivité et valeurs manquantes (avec Carte visuelle)"),
+            tags$li("Section 3 : Tableaux de fréquences, statistiques descriptives univariées et calcul de Prévalence"),
+            tags$li("Section 4 : Comparaisons bivariées (ANOVA + Tukey) et Modélisations (Régression logistique bivariée / multivariée)"),
+            tags$li("Section 5 : Échelles de Likert, réponses multiples, Matrice de corrélations et Performance diagnostique")
           ),
           tags$div(
             class = "alert alert-success mt-4",
@@ -171,7 +174,7 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
           # 3. Bivariate Section
           if (isTRUE(input$inc_bivar)) {
             b_res <- tryCatch(bivar_reactive(), error = function(e) NULL)
-            if (!is.null(b_res) && !is.null(b_res$res)) {
+            if (!is.null(b_res) && !is.null(b_res$res) && b_res$res$method != "multivariate_or") {
               doc <- officer::body_add_par(doc, "3. Analyse Bivariée & Modélisation", style = "heading 1")
               doc <- officer::body_add_par(doc, paste("Outcome :", b_res$target), style = "heading 2")
               
@@ -184,12 +187,20 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
                 for (item in results) {
                   pred_name <- item$pred
                   val <- item$value
+                  anova_val <- item$anova
                   doc <- officer::body_add_par(doc, paste("Comparaison :", pred_name, "vs", b_res$target), style = "heading 3")
                   if (inherits(val, "flextable")) {
                     doc <- flextable::body_add_flextable(doc, val)
                   } else if (is.data.frame(val)) {
                     ft <- flextable::theme_vanilla(flextable::flextable(val))
                     doc <- flextable::body_add_flextable(doc, ft)
+                  }
+
+                  if (!is.null(anova_val)) {
+                    doc <- officer::body_add_par(doc, "Tableau d'ANOVA à un facteur", style = "heading 4")
+                    if (inherits(anova_val$anova, "flextable")) doc <- flextable::body_add_flextable(doc, anova_val$anova)
+                    doc <- officer::body_add_par(doc, "Test post-hoc de Tukey (HSD)", style = "heading 4")
+                    if (inherits(anova_val$tukey, "flextable")) doc <- flextable::body_add_flextable(doc, anova_val$tukey)
                   }
                   doc <- officer::body_add_par(doc, "", style = "Normal")
                 }
@@ -205,6 +216,24 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
             }
           }
           
+          # 3.5. Multivariable Regression Section
+          if (isTRUE(input$inc_multiv)) {
+            b_res <- tryCatch(bivar_reactive(), error = function(e) NULL)
+            if (!is.null(b_res) && !is.null(b_res$res) && b_res$res$method == "multivariate_or") {
+              doc <- officer::body_add_par(doc, "3.2. Modélisation par Régression Logistique Multivariée", style = "heading 2")
+              res_info <- b_res$res
+              results <- res_info$results
+
+              if (inherits(results, "flextable")) {
+                doc <- flextable::body_add_flextable(doc, results)
+              } else if (is.data.frame(results)) {
+                ft_mult <- flextable::theme_vanilla(flextable::flextable(results))
+                doc <- flextable::body_add_flextable(doc, ft_mult)
+              }
+              doc <- officer::body_add_par(doc, "", style = "Normal")
+            }
+          }
+
           # 4. Specialized Section
           if (isTRUE(input$inc_spec)) {
             s_res <- tryCatch(spec_reactive(), error = function(e) NULL)
@@ -214,7 +243,38 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
                 doc <- officer::body_add_par(doc, "Échelle de Likert", style = "heading 2")
                 if (inherits(s_res$likert, "flextable")) doc <- flextable::body_add_flextable(doc, s_res$likert)
                 else if (is.data.frame(s_res$likert)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$likert)))
+                doc <- officer::body_add_par(doc, "", style = "Normal")
               }
+              if (!is.null(s_res$multi)) {
+                doc <- officer::body_add_par(doc, "Analyse des Réponses Multiples", style = "heading 2")
+                if (inherits(s_res$multi, "flextable")) doc <- flextable::body_add_flextable(doc, s_res$multi)
+                else if (is.data.frame(s_res$multi)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$multi)))
+                doc <- officer::body_add_par(doc, "", style = "Normal")
+              }
+            }
+          }
+
+          # 4.2. Correlation Matrix Section
+          if (isTRUE(input$inc_cor)) {
+            s_res <- tryCatch(spec_reactive(), error = function(e) NULL)
+            if (!is.null(s_res) && !is.null(s_res$correlation_matrix)) {
+              doc <- officer::body_add_par(doc, "4.2. Matrice de Corrélations complète", style = "heading 2")
+              res <- s_res$correlation_matrix
+              if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+              else if (is.data.frame(res)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(res)))
+              doc <- officer::body_add_par(doc, "", style = "Normal")
+            }
+          }
+
+          # 4.3. Diagnostic Performance Section
+          if (isTRUE(input$inc_diag)) {
+            s_res <- tryCatch(spec_reactive(), error = function(e) NULL)
+            if (!is.null(s_res) && !is.null(s_res$diagnostic)) {
+              doc <- officer::body_add_par(doc, "4.3. Performance Diagnostique du Test", style = "heading 2")
+              res <- s_res$diagnostic
+              if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+              else if (is.data.frame(res)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(res)))
+              doc <- officer::body_add_par(doc, "", style = "Normal")
             }
           }
           

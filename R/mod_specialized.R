@@ -24,7 +24,9 @@ mod_specialized_ui <- function(id) {
               downloadButton(ns("dl_likert_word"), "Word (.docx)", class = "btn-outline-primary btn-sm")
             )
           ),
-          uiOutput(ns("likert_ui"))
+          uiOutput(ns("likert_ui")),
+          tags$div(class = "my-2"),
+          plotOutput(ns("likert_plot"), height = "400px")
         )
       )
     ),
@@ -60,19 +62,60 @@ mod_specialized_ui <- function(id) {
           selectInput(ns("heatmap_vars"), "Sélectionner les variables (min 2) :", choices = NULL, multiple = TRUE),
           width = 300
         ),
+        bslib::layout_column_wrap(
+          width = 1/2,
+          bslib::card(
+            bslib::card_header(
+              tags$div(
+                class = "d-flex justify-content-between align-items-center w-100",
+                tags$span(icon("image", class = "me-2"), " Carte Thermique des Corrélations"),
+                tags$div(
+                  class = "btn-group btn-group-sm",
+                  downloadButton(ns("dl_hm_png"), "PNG", class = "btn-outline-success btn-sm"),
+                  downloadButton(ns("dl_hm_pdf"), "PDF", class = "btn-outline-danger btn-sm")
+                )
+              )
+            ),
+            plotOutput(ns("heatmap_plot"), height = "450px")
+          ),
+          bslib::card(
+            bslib::card_header(
+              tags$div(
+                class = "d-flex justify-content-between align-items-center w-100",
+                tags$span(icon("table", class = "me-2"), " Matrice de Corrélations (Coefficients)"),
+                downloadButton(ns("dl_cor_word"), "Word (.docx)", class = "btn-outline-primary btn-sm")
+              )
+            ),
+            uiOutput(ns("correlation_table_ui"))
+          )
+        )
+      )
+    ),
+
+    # Tab 4: Diagnostic Performance
+    bslib::nav_panel(
+      title = tags$span(icon("stethoscope"), " Performance Diagnostique"),
+      bslib::layout_sidebar(
+        sidebar = bslib::sidebar(
+          title = "Indicateurs Diagnostiques",
+          selectInput(ns("diag_actual"), "Standard de référence / Gold Standard :", choices = NULL),
+          selectInput(ns("diag_predicted"), "Test diagnostique à évaluer :", choices = NULL),
+          uiOutput(ns("diag_pos_ui")),
+          width = 320
+        ),
         bslib::card(
           bslib::card_header(
             tags$div(
               class = "d-flex justify-content-between align-items-center w-100",
-              tags$span(icon("image", class = "me-2"), " Carte Thermique des Corrélations"),
+              tags$span(icon("table", class = "me-2"), " Indicateurs diagnostiques (Sensibilité, Spécificité, VPP, VPN)"),
               tags$div(
                 class = "btn-group btn-group-sm",
-                downloadButton(ns("dl_hm_png"), "PNG", class = "btn-outline-success btn-sm"),
-                downloadButton(ns("dl_hm_pdf"), "PDF", class = "btn-outline-danger btn-sm")
+                downloadButton(ns("dl_diag_word"), "Word (.docx)", class = "btn-outline-primary btn-sm"),
+                downloadButton(ns("dl_diag_csv"), "CSV", class = "btn-outline-secondary btn-sm")
               )
             )
           ),
-          plotOutput(ns("heatmap_plot"), height = "450px")
+          uiOutput(ns("diagnostic_results_ui"))
         )
       )
     )
@@ -90,6 +133,16 @@ mod_specialized_server <- function(id, data_reactive) {
       updateSelectInput(session, "multi_vars", choices = names(df))
       num_cols <- names(df)[sapply(df, is.numeric)]
       updateSelectInput(session, "heatmap_vars", choices = num_cols, selected = head(num_cols, 4))
+      updateSelectInput(session, "diag_actual", choices = names(df))
+      updateSelectInput(session, "diag_predicted", choices = names(df))
+    })
+
+    output$diag_pos_ui <- renderUI({
+      df <- data_reactive()
+      req(df, input$diag_actual)
+      vals <- unique(df[[input$diag_actual]])
+      vals <- vals[!is.na(vals)]
+      selectInput(ns("diag_pos_val"), "Valeur du cas positif :", choices = vals)
     })
     
     # 1. Likert logic
@@ -122,6 +175,41 @@ mod_specialized_server <- function(id, data_reactive) {
       }
     })
     output$raw_likert <- renderTable({ likert_res() }, striped = TRUE, hover = TRUE)
+
+    likert_plot_res <- reactive({
+      df <- data_reactive()
+      req(df, input$likert_var)
+
+      vec <- df[[input$likert_var]]
+      if (!is.numeric(vec)) {
+        fact <- as.factor(vec)
+        df_copy <- df
+        df_copy[[input$likert_var]] <- as.numeric(fact)
+        lvls <- levels(fact)
+        n_lvls <- length(lvls)
+
+        if (exists("plot_likert_divergent", where = asNamespace("analytix"))) {
+          analytix::plot_likert_divergent(df_copy, cols = input$likert_var, n_levels = n_lvls, level_labels = lvls)
+        } else {
+          NULL
+        }
+      } else {
+        n_lvls <- length(unique(na.omit(vec)))
+        if (exists("plot_likert_divergent", where = asNamespace("analytix"))) {
+          analytix::plot_likert_divergent(df, cols = input$likert_var, n_levels = max(c(5, n_lvls)))
+        } else {
+          NULL
+        }
+      }
+    })
+
+    output$likert_plot <- renderPlot({
+      p <- likert_plot_res()
+      shiny::validate(
+        shiny::need(!is.null(p), "Le graphique de Likert divergent n'est pas disponible pour cette variable.")
+      )
+      p
+    })
     
     # 2. Multi choice logic
     multi_res <- reactive({
@@ -152,7 +240,7 @@ mod_specialized_server <- function(id, data_reactive) {
     })
     output$raw_multi <- renderTable({ multi_res() }, striped = TRUE, hover = TRUE)
     
-    # 3. Heatmap logic
+    # 3. Heatmap & Correlation logic
     current_hm_plot <- reactive({
       df <- data_reactive()
       shiny::validate(
@@ -161,6 +249,11 @@ mod_specialized_server <- function(id, data_reactive) {
       )
       vars <- input$heatmap_vars
       
+      if (exists("plot_correlation", where = asNamespace("analytix"))) {
+        p <- tryCatch(analytix::plot_correlation(df, cols = vars), error = function(e) NULL)
+        if (!is.null(p) && inherits(p, "ggplot")) return(p)
+      }
+
       if (exists("plot_heatmap_matrix", where = asNamespace("analytix"))) {
         p <- tryCatch(analytix::plot_heatmap_matrix(df, vars = vars), error = function(e) NULL)
         if (!is.null(p) && inherits(p, "ggplot")) return(p)
@@ -178,6 +271,78 @@ mod_specialized_server <- function(id, data_reactive) {
     })
     
     output$heatmap_plot <- renderPlot({ current_hm_plot() })
+
+    cor_table_res <- reactive({
+      df <- data_reactive()
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$heatmap_vars) && length(input$heatmap_vars) >= 2, "Veuillez sélectionner au moins 2 variables numériques.")
+      )
+      vars <- input$heatmap_vars
+
+      if (exists("correlation_table", where = asNamespace("analytix"))) {
+        res <- tryCatch(analytix::correlation_table(df, cols = vars), error = function(e) NULL)
+        if (!is.null(res)) return(res)
+      }
+
+      cor_m <- cor(df[vars], use = "pairwise.complete.obs")
+      as.data.frame(cor_m)
+    })
+
+    output$correlation_table_ui <- renderUI({
+      res <- cor_table_res()
+      req(res)
+      if (inherits(res, "flextable")) {
+        flextable::htmltools_value(res)
+      } else if (is.data.frame(res)) {
+        tableOutput(ns("raw_cor_table"))
+      }
+    })
+    output$raw_cor_table <- renderTable({ cor_table_res() }, rownames = TRUE, striped = TRUE, hover = TRUE)
+
+    # 4. Diagnostic Performance logic
+    diagnostic_res <- reactive({
+      df <- data_reactive()
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$diag_actual) && isTruthy(input$diag_predicted), "Veuillez sélectionner le Gold Standard et le Test à évaluer.")
+      )
+
+      act <- df[[input$diag_actual]]
+      pred <- df[[input$diag_predicted]]
+      pos_v <- input$diag_pos_val
+      req(pos_v)
+
+      if (exists("calc_sensitivity_specificity", where = asNamespace("analytix"))) {
+        res <- tryCatch({
+          analytix::calc_sensitivity_specificity(act, pred, positive_val = pos_v)
+        }, error = function(e) {
+          NULL
+        })
+        if (!is.null(res)) return(res)
+      }
+
+      tp <- sum(act == pos_v & pred == pos_v, na.rm = TRUE)
+      fp <- sum(act != pos_v & pred == pos_v, na.rm = TRUE)
+      fn <- sum(act == pos_v & pred != pos_v, na.rm = TRUE)
+      tn <- sum(act != pos_v & pred != pos_v, na.rm = TRUE)
+      data.frame(
+        Indicateur = c("Vrais Positifs (VP)", "Faux Positifs (FP)", "Faux Négatifs (FN)", "Vrais Négatifs (VN)"),
+        Valeur = c(tp, fp, fn, tn),
+        stringsAsFactors = FALSE
+      )
+    })
+
+    output$diagnostic_results_ui <- renderUI({
+      res <- diagnostic_res()
+      req(res)
+      if (inherits(res, "flextable")) {
+        flextable::htmltools_value(res)
+      } else if (is.data.frame(res)) {
+        tableOutput(ns("raw_diagnostic_table"))
+      }
+    })
+    output$raw_diagnostic_table <- renderTable({ diagnostic_res() }, striped = TRUE, hover = TRUE)
     
     # ⚡ EXPORT IMMÉDIAT HANDLERS
     output$dl_likert_word <- downloadHandler(
@@ -211,9 +376,49 @@ mod_specialized_server <- function(id, data_reactive) {
       filename = function() { "Heatmap_Correlations.pdf" },
       content = function(file) { ggplot2::ggsave(file, plot = current_hm_plot(), width = 8, height = 6) }
     )
+
+    output$dl_cor_word <- downloadHandler(
+      filename = function() { "Matrice_Correlations.docx" },
+      content = function(file) {
+        doc <- officer::read_docx()
+        res <- cor_table_res()
+        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
+        print(doc, target = file)
+      }
+    )
+
+    output$dl_diag_word <- downloadHandler(
+      filename = function() { "Performance_Diagnostique.docx" },
+      content = function(file) {
+        doc <- officer::read_docx()
+        res <- diagnostic_res()
+        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
+        print(doc, target = file)
+      }
+    )
+
+    output$dl_diag_csv <- downloadHandler(
+      filename = function() { "Performance_Diagnostique.csv" },
+      content = function(file) {
+        res <- diagnostic_res()
+        if (inherits(res, "flextable")) {
+          write.csv(res$body$dataset, file, row.names = FALSE)
+        } else if (is.data.frame(res)) {
+          write.csv(res, file, row.names = FALSE)
+        }
+      }
+    )
     
     return(reactive({
-      list(likert = likert_res(), multi = multi_res(), heatmap = current_hm_plot())
+      list(
+        likert = likert_res(),
+        multi = multi_res(),
+        heatmap = current_hm_plot(),
+        correlation_matrix = tryCatch(cor_table_res(), error = function(e) NULL),
+        diagnostic = tryCatch(diagnostic_res(), error = function(e) NULL)
+      )
     }))
   })
 }
