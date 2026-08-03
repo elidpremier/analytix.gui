@@ -9,7 +9,7 @@ mod_bivariate_ui <- function(id) {
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       title = tags$div(
-        bsicons::bs_icon("diagram-3", class = "me-2 text-primary"),
+        icon("project-diagram", class = "me-2 text-primary"),
         "Configuration Bivariée"
       ),
       width = 340,
@@ -41,7 +41,7 @@ mod_bivariate_ui <- function(id) {
       tags$div(
         class = "alert alert-warning py-2 px-3",
         style = "font-size: 0.85rem;",
-        bsicons::bs_icon("lightbulb-fill", class = "me-1"),
+        icon("lightbulb", class = "me-1"),
         "Les p-values et Odds Ratios (avec IC 95%) sont calculés automatiquement selon la nature des variables."
       )
     ),
@@ -52,7 +52,7 @@ mod_bivariate_ui <- function(id) {
       bslib::card(
         bslib::card_header(
           tags$div(
-            bsicons::bs_icon("table"), " Résultats Bivariés & Tests Statistiques (analytix)"
+            icon("table", class = "me-2"), " Résultats Bivariés & Tests Statistiques (analytix)"
           )
         ),
         uiOutput(ns("bivariate_results_ui"))

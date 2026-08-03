@@ -9,7 +9,7 @@ mod_import_ui <- function(id) {
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       title = tags$div(
-        bsicons::bs_icon("cloud-arrow-up", class = "me-2 text-primary"),
+        icon("cloud-upload-alt", class = "me-2 text-primary"),
         "Chargement des Données"
       ),
       width = 320,
@@ -36,7 +36,7 @@ mod_import_ui <- function(id) {
       ),
       
       tags$hr(),
-      tags$h6(bsicons::bs_icon("sliders", class = "me-1"), "Options de Nettoyage Initial"),
+      tags$h6(icon("sliders-h", class = "me-1"), "Options de Nettoyage Initial"),
       
       checkboxInput(ns("clean_colnames"), "Nettoyer les noms de colonnes (snake_case)", value = TRUE),
       checkboxInput(ns("trim_whitespace"), "Supprimer les espaces superflus (trim)", value = TRUE),
@@ -56,15 +56,15 @@ mod_import_ui <- function(id) {
       # Onglets de prévisualisation
       bslib::navset_card_tab(
         bslib::nav_panel(
-          title = tags$span(bsicons::bs_icon("table"), " Aperçu de la Table"),
-          DT::DTOutput(ns("preview_table"))
+          title = tags$span(icon("table"), " Aperçu de la Table"),
+          uiOutput(ns("preview_table_container"))
         ),
         bslib::nav_panel(
-          title = tags$span(bsicons::bs_icon("info-circle"), " Structure des Colonnes & Types"),
+          title = tags$span(icon("info-circle"), " Structure des Colonnes & Types"),
           tableOutput(ns("column_types_table"))
         ),
         bslib::nav_panel(
-          title = tags$span(bsicons::bs_icon("exclamation-triangle"), " Synthèse des Manquants"),
+          title = tags$span(icon("exclamation-triangle"), " Synthèse des Manquants"),
           uiOutput(ns("missing_summary_ui"))
         )
       )
@@ -154,7 +154,7 @@ mod_import_server <- function(id) {
             bslib::value_box(
               title = "Fichier",
               value = "Aucun",
-              showcase = bsicons::bs_icon("file-earmark-x"),
+              showcase = icon("file-excel"),
               theme = "secondary"
             )
           )
@@ -171,39 +171,53 @@ mod_import_server <- function(id) {
         bslib::value_box(
           title = "Lignes / Participants",
           value = format(n_rows, big.mark = " "),
-          showcase = bsicons::bs_icon("people-fill"),
+          showcase = icon("users"),
           theme = "primary"
         ),
         bslib::value_box(
           title = "Variables / Colonnes",
           value = format(n_cols, big.mark = " "),
-          showcase = bsicons::bs_icon("columns-gap"),
+          showcase = icon("columns"),
           theme = "info"
         ),
         bslib::value_box(
           title = "Valeurs Manquantes (NA)",
           value = sprintf("%s (%s%%)", format(n_na, big.mark = " "), pct_na),
-          showcase = bsicons::bs_icon("exclamation-circle-fill"),
+          showcase = icon("exclamation-circle"),
           theme = if (pct_na > 15) "warning" else "success"
         )
       )
     })
     
-    # 5. DT Preview Table
-    output$preview_table <- DT::renderDT({
+    # 5. Preview Table Container (Supporte DT si installé, sinon table standard)
+    output$preview_table_container <- renderUI({
+      if (requireNamespace("DT", quietly = TRUE)) {
+        DT::DTOutput(ns("preview_dt"))
+      } else {
+        tableOutput(ns("preview_std"))
+      }
+    })
+    
+    output$preview_dt <- renderUI({
+      req(requireNamespace("DT", quietly = TRUE))
       df <- cleaned_data()
       req(df)
-      DT::datatable(
+      DT::renderDT(
         df,
         options = list(
           pageLength = 10,
           scrollX = TRUE,
-          dom = 'Bfrtip',
-          language = list(url = '//cdn.datatables.net/plug-ins/1.10.25/i18n/French.json')
+          dom = 'Bfrtip'
         ),
         class = "cell-border stripe hover"
       )
     })
+    
+    output$preview_std <- renderTable({
+      df <- cleaned_data()
+      req(df)
+      head(df, 15)
+    }, striped = TRUE, hover = TRUE, bordered = TRUE)
     
     # 6. Column Types Table
     output$column_types_table <- renderTable({

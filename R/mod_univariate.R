@@ -9,7 +9,7 @@ mod_univariate_ui <- function(id) {
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       title = tags$div(
-        bsicons::bs_icon("chart-bar", class = "me-2 text-primary"),
+        icon("chart-bar", class = "me-2 text-primary"),
         "Configuration Univariée"
       ),
       width = 320,
@@ -40,7 +40,7 @@ mod_univariate_ui <- function(id) {
       tags$div(
         class = "alert alert-info py-2 px-3",
         style = "font-size: 0.85rem;",
-        bsicons::bs_icon("info-circle-fill", class = "me-1"),
+        icon("info-circle", class = "me-1"),
         "Astuce : le package analytix adapte automatiquement les statistiques (Moyenne ± SD vs Médiane [IQR]) selon la distribution."
       )
     ),
@@ -55,7 +55,7 @@ mod_univariate_ui <- function(id) {
         bslib::card(
           bslib::card_header(
             tags$div(
-              bsicons::bs_icon("table"), " Tableau Descriptif Normé (analytix)"
+              icon("table", class = "me-2"), " Tableau Descriptif Normé (analytix)"
             )
           ),
           uiOutput(ns("univariate_table_ui"))
@@ -65,7 +65,7 @@ mod_univariate_ui <- function(id) {
         bslib::card(
           bslib::card_header(
             tags$div(
-              bsicons::bs_icon("image"), " Visualisation Graphique"
+              icon("image", class = "me-2"), " Visualisation Graphique"
             )
           ),
           plotOutput(ns("univariate_plot"), height = "420px")

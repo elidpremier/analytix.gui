@@ -11,7 +11,7 @@ mod_export_ui <- function(id) {
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       title = tags$div(
-        bsicons::bs_icon("file-word-fill", class = "me-2 text-primary"),
+        icon("file-word", class = "me-2 text-primary"),
         "Paramètres du Rapport"
       ),
       width = 340,
@@ -42,7 +42,7 @@ mod_export_ui <- function(id) {
       bslib::card(
         bslib::card_header(
           tags$div(
-            bsicons::bs_icon("eye"), " Aperçu de la Structure du Document Word"
+            icon("eye", class = "me-2"), " Aperçu de la Structure du Document Word"
           )
         ),
         tags$div(
@@ -60,7 +60,7 @@ mod_export_ui <- function(id) {
           ),
           tags$div(
             class = "alert alert-success mt-4",
-            bsicons::bs_icon("check-circle-fill", class = "me-2"),
+            icon("check-circle", class = "me-2"),
             "Le document produit est un fichier Microsoft Word (.docx) natif, entièrement modifiable et conforme aux standards de publication scientifique."
           )
         )

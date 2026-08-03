@@ -6,12 +6,20 @@
 
 library(shiny)
 library(bslib)
-library(bsicons)
 library(dplyr)
 library(ggplot2)
 library(flextable)
 library(officer)
-library(DT)
+library(readxl)
+
+# Safe icon helper (utilise bsicons si présent, sinon shiny::icon)
+safe_icon <- function(name, class = "", fa_fallback = "circle") {
+  if (requireNamespace("bsicons", quietly = TRUE)) {
+    return(bsicons::bs_icon(name, class = class))
+  } else {
+    return(shiny::icon(fa_fallback, class = class))
+  }
+}
 
 # --- Chargement de analytix (local dev ou package installé) ---
 if (requireNamespace("analytix", quietly = TRUE)) {
@@ -32,9 +40,10 @@ source("R/mod_export.R")
 
 # --- UI de l'application ---
 ui <- bslib::page_navbar(
+  id = "navbar",
   title = tags$div(
     class = "d-flex align-items-center gap-2",
-    bsicons::bs_icon("bar-chart-line-fill", class = "text-info fs-4"),
+    safe_icon("chart-line-fill", class = "text-info fs-4", fa_fallback = "chart-line"),
     tags$span("Analytix", style = "font-weight: 700; font-size: 1.25rem;"),
     tags$span("GUI", class = "badge-gui")
   ),
@@ -52,14 +61,13 @@ ui <- bslib::page_navbar(
   ),
   
   header = tags$head(
-    includeCSS("www/style.css"),
-    tags$link(rel = "shortcut icon", href = "favicon.ico")
+    includeCSS("www/style.css")
   ),
   
   # --- Onglet 0 : Accueil ---
   bslib::nav_panel(
     title = "Accueil & Guide",
-    icon = bsicons::bs_icon("house-door-fill"),
+    icon = safe_icon("house-door-fill", fa_fallback = "home"),
     
     tags$div(
       class = "container py-4",
@@ -81,7 +89,7 @@ ui <- bslib::page_navbar(
           ),
           tags$div(
             class = "col-lg-4 text-center d-none d-lg-block",
-            bsicons::bs_icon("file-earmark-medical", size = "8x", class = "text-white-50")
+            safe_icon("file-earmark-medical", class = "text-white-50", fa_fallback = "notes-medical")
           )
         )
       ),
@@ -118,7 +126,7 @@ ui <- bslib::page_navbar(
       
       # Public Target Section
       bslib::card(
-        bslib::card_header(tags$div(bsicons::bs_icon("heart-pulse-fill", class = "me-2 text-danger"), "Conçu pour vos besoins")),
+        bslib::card_header(tags$div(safe_icon("heart-pulse-fill", class = "me-2 text-danger", fa_fallback = "heartbeat"), "Conçu pour vos besoins")),
         tags$div(
           class = "row p-3",
           tags$div(
@@ -144,28 +152,28 @@ ui <- bslib::page_navbar(
   # --- Onglet 1 : Données ---
   bslib::nav_panel(
     title = "1. Données",
-    icon = bsicons::bs_icon("file-earmark-spreadsheet-fill"),
+    icon = safe_icon("file-earmark-spreadsheet-fill", fa_fallback = "table"),
     mod_import_ui("import_module")
   ),
   
   # --- Onglet 2 : Univarié ---
   bslib::nav_panel(
     title = "2. Univarié",
-    icon = bsicons::bs_icon("pie-chart-fill"),
+    icon = safe_icon("pie-chart-fill", fa_fallback = "chart-pie"),
     mod_univariate_ui("univariate_module")
   ),
   
   # --- Onglet 3 : Bivarié ---
   bslib::nav_panel(
     title = "3. Bivarié & Tests",
-    icon = bsicons::bs_icon("diagram-3-fill"),
+    icon = safe_icon("diagram-3-fill", fa_fallback = "project-diagram"),
     mod_bivariate_ui("bivariate_module")
   ),
   
   # --- Onglet 4 : Rapport Word ---
   bslib::nav_panel(
     title = "4. Rapport Word",
-    icon = bsicons::bs_icon("file-word-fill"),
+    icon = safe_icon("file-word-fill", fa_fallback = "file-word"),
     mod_export_ui("export_module")
   ),
   
@@ -176,7 +184,7 @@ ui <- bslib::page_navbar(
       href = "https://github.com/elidopremier/analytix.gui",
       target = "_blank",
       class = "nav-link text-white-50",
-      bsicons::bs_icon("github", class = "me-1"), "GitHub"
+      icon("github", class = "me-1"), "GitHub"
     )
   )
 )
