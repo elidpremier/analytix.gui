@@ -166,7 +166,7 @@ ui <- bslib::page_navbar(
   
   nav_item(
     tags$a(
-      href = "https://github.com/elidopremier/analytix.gui",
+      href = "https://github.com/elidpremier/analytix.gui",
       target = "_blank",
       class = "nav-link text-white-50",
       icon("github", class = "me-1"), "GitHub"

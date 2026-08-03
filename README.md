@@ -5,7 +5,7 @@
 [![bslib](https://img.shields.io/badge/bslib-Bootstrap%205-0284c7.svg)](https://rstudio.github.io/bslib/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**`analytix.gui`** est une application web interactive **No-Code** construite avec R Shiny et `bslib`. Elle embarque le moteur de calcul du package R [`analytix`](https://github.com/elidopremier/analytix) en arrière-plan pour permettre aux cliniciens non-codeurs, aux étudiants et aux clients de **Redaklab** de glisser-déposer leur fichier Excel ou CSV et d'obtenir un rapport Word (`.docx`) nettoyé et mis en forme sans écrire la moindre ligne de code R.
+**`analytix.gui`** est une application web interactive **No-Code** construite avec R Shiny et `bslib`. Elle embarque le moteur de calcul du package R [`analytix`](https://github.com/elidpremier/analytix) en arrière-plan pour permettre aux cliniciens non-codeurs, aux étudiants et aux clients de **Redaklab** de glisser-déposer leur fichier Excel ou CSV et d'obtenir un rapport Word (`.docx`) nettoyé et mis en forme sans écrire la moindre ligne de code R.
 
 ---
 
@@ -59,14 +59,14 @@ analytix.gui/
 
 1. Clonez ce dépôt GitHub :
    ```bash
-   git clone https://github.com/elidopremier/analytix.gui.git
+   git clone https://github.com/elidpremier/analytix.gui.git
    cd analytix.gui
    ```
 
 2. Assurez-vous que le package `analytix` est installé (ou situé dans le dossier parent) :
    ```r
-   # Si analytix est publié sur GitHub :
-   devtools::install_github("elidopremier/analytix")
+
+   devtools::install_github("elidpremier/analytix")
    ```
 
 3. Lancez l'application Shiny :
