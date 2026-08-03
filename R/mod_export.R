@@ -76,18 +76,34 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
-    output$prev_title <- renderText({ input$report_title })
-    output$prev_subtitle <- renderText({ input$report_subtitle })
-    output$prev_author <- renderText({ paste(input$report_author, "-", input$report_institution) })
+    output$prev_title <- renderText({
+      df <- data_reactive()
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Attention : Aucun jeu de données chargé. Veuillez d'abord charger vos données dans l'onglet 'Données & Libellés' pour générer le rapport.")
+      )
+      input$report_title
+    })
+    output$prev_subtitle <- renderText({
+      req(data_reactive())
+      input$report_subtitle
+    })
+    output$prev_author <- renderText({
+      req(data_reactive())
+      paste(input$report_author, "-", input$report_institution)
+    })
     
     output$download_word <- downloadHandler(
       filename = function() {
         paste0("Rapport_Analytix_Complet_", format(Sys.Date(), "%Y%m%d"), ".docx")
       },
       content = function(file) {
+        df <- data_reactive()
+        if (is.null(df)) {
+          showNotification("Impossible de générer le rapport : Aucun jeu de données chargé.", type = "error")
+          return(NULL)
+        }
         shiny::withProgress(message = 'Génération du rapport Word global...', value = 0, {
           
-          df <- data_reactive()
           shiny::incProgress(0.2, detail = "Initialisation du document...")
           
           doc <- officer::read_docx()
@@ -112,6 +128,25 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
             doc <- officer::body_add_par(doc, "", style = "Normal")
           }
           
+          # 1.5. Missing Values Section
+          if (isTRUE(input$inc_missing) && !is.null(df)) {
+            doc <- officer::body_add_par(doc, "1.2. Diagnostic des Valeurs Manquantes", style = "heading 2")
+
+            na_counts <- sapply(df, function(x) sum(is.na(x)))
+            na_pct <- round((na_counts / nrow(df)) * 100, 1)
+            na_df <- data.frame(
+              `Variable` = names(df),
+              `Nombre de NA` = na_counts,
+              `Proportion` = paste0(na_pct, " %"),
+              check.names = FALSE
+            )
+            na_df_sorted <- na_df[order(-na_counts), ]
+
+            ft_na <- flextable::theme_vanilla(flextable::flextable(na_df_sorted))
+            doc <- flextable::body_add_flextable(doc, ft_na)
+            doc <- officer::body_add_par(doc, "", style = "Normal")
+          }
+
           shiny::incProgress(0.6, detail = "Ajout des tableaux univariés...")
           
           # 2. Univariate Section
@@ -140,13 +175,33 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               doc <- officer::body_add_par(doc, "3. Analyse Bivariée & Modélisation", style = "heading 1")
               doc <- officer::body_add_par(doc, paste("Outcome :", b_res$target), style = "heading 2")
               
-              if (inherits(b_res$res, "flextable")) {
-                doc <- flextable::body_add_flextable(doc, b_res$res)
-              } else if (is.data.frame(b_res$res)) {
-                ft_b <- flextable::theme_vanilla(flextable::flextable(b_res$res))
-                doc <- flextable::body_add_flextable(doc, ft_b)
+              res_info <- b_res$res
+              method <- res_info$method
+              type <- res_info$type
+              results <- res_info$results
+
+              if (method == "group_comparison" && type == "list") {
+                for (item in results) {
+                  pred_name <- item$pred
+                  val <- item$value
+                  doc <- officer::body_add_par(doc, paste("Comparaison :", pred_name, "vs", b_res$target), style = "heading 3")
+                  if (inherits(val, "flextable")) {
+                    doc <- flextable::body_add_flextable(doc, val)
+                  } else if (is.data.frame(val)) {
+                    ft <- flextable::theme_vanilla(flextable::flextable(val))
+                    doc <- flextable::body_add_flextable(doc, ft)
+                  }
+                  doc <- officer::body_add_par(doc, "", style = "Normal")
+                }
+              } else {
+                if (inherits(results, "flextable")) {
+                  doc <- flextable::body_add_flextable(doc, results)
+                } else if (is.data.frame(results)) {
+                  ft_b <- flextable::theme_vanilla(flextable::flextable(results))
+                  doc <- flextable::body_add_flextable(doc, ft_b)
+                }
+                doc <- officer::body_add_par(doc, "", style = "Normal")
               }
-              doc <- officer::body_add_par(doc, "", style = "Normal")
             }
           }
           
