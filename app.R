@@ -24,6 +24,8 @@ safe_icon <- function(name, class = "", fa_fallback = "circle") {
 # --- Chargement de analytix ---
 if (requireNamespace("analytix", quietly = TRUE)) {
   library(analytix)
+} else if (file.exists("analytix_pkg/DESCRIPTION")) {
+  sapply(list.files("analytix_pkg/R", pattern = "\\.R$", full.names = TRUE), source)
 } else if (file.exists("../analytix/DESCRIPTION")) {
   if (requireNamespace("devtools", quietly = TRUE)) {
     devtools::load_all("../analytix")

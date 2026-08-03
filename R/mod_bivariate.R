@@ -32,7 +32,8 @@ mod_bivariate_ui <- function(id) {
         "Type d'Analyse Statistical / Table :",
         choices = c(
           "📊 Tableau 1 : Comparaison de Groupes (Chi², Student, Mann-Whitney)" = "group_comparison",
-          "📈 Table d'Odds Ratios (Régression Logistique Bivariée)" = "or_table"
+          "📈 Table d'Odds Ratios (Régression Logistique Bivariée)" = "or_table",
+          "🧬 Régression Logistique Multivariée (Odds Ratios ajustés)" = "multivariate_or"
         ),
         selected = "group_comparison"
       ),
@@ -102,6 +103,17 @@ mod_bivariate_server <- function(id, data_reactive) {
                 analytix::descr_by_group(df, var = !!p_sym, by = !!target_sym),
                 error = function(e) NULL
               )
+
+              anova_res <- NULL
+              if (is.numeric(df[[p]]) && length(unique(df[[target]])) >= 3) {
+                if (exists("anova_table", where = asNamespace("analytix"))) {
+                  anova_res <- tryCatch(
+                    analytix::anova_table(df, var = !!p_sym, group = !!target_sym),
+                    error = function(e) NULL
+                  )
+                }
+              }
+
               if (is.null(res)) {
                 # Fallback dataframe if descr_by_group fails
                 tb <- table(df[[p]], df[[target]])
@@ -112,7 +124,7 @@ mod_bivariate_server <- function(id, data_reactive) {
                   check.names = FALSE
                 )
               }
-              list(pred = p, value = res)
+              list(pred = p, value = res, anova = anova_res)
             })
             ft_list <- Filter(function(x) !is.null(x$value), ft_list)
             return(list(method = "group_comparison", type = "list", target = target, results = ft_list))
@@ -152,6 +164,24 @@ mod_bivariate_server <- function(id, data_reactive) {
             IC_95 = "[ - ]"
           )
           return(list(method = "or_table", type = "df", target = target, results = res_df))
+
+        } else if (method == "multivariate_or") {
+          if (exists("multivariable_logistic_table", where = asNamespace("analytix"))) {
+            form <- stats::as.formula(paste(target, "~", paste(preds, collapse = " + ")))
+            res <- tryCatch({
+              analytix::multivariable_logistic_table(form, data = df)
+            }, error = function(e) {
+              data.frame(Erreur = paste("Erreur d'ajustement du modèle GLM (l'Outcome doit être binaire) :", e$message), stringsAsFactors = FALSE)
+            })
+            return(list(method = "multivariate_or", type = "flextable", target = target, results = res))
+          } else {
+            res_df <- data.frame(
+              Predictor = preds,
+              Outcome = target,
+              Note = "Fonction multivariable_logistic_table non disponible"
+            )
+            return(list(method = "multivariate_or", type = "df", target = target, results = res_df))
+          }
         }
       }, error = function(e) {
         err_df <- data.frame(Erreur = paste("Erreur bivariée :", e$message))
@@ -172,6 +202,7 @@ mod_bivariate_server <- function(id, data_reactive) {
           item <- results[[i]]
           pred_name <- item$pred
           val <- item$value
+          anova_val <- item$anova
 
           tags$div(
             class = "mb-4 p-3 border rounded bg-white",
@@ -181,6 +212,19 @@ mod_bivariate_server <- function(id, data_reactive) {
             } else if (is.data.frame(val)) {
               ft <- flextable::theme_vanilla(flextable::flextable(val))
               flextable::htmltools_value(ft)
+            },
+
+            if (!is.null(anova_val)) {
+              tags$div(
+                class = "mt-3 p-3 border-start border-primary bg-light rounded",
+                tags$h6(class = "fw-bold text-primary", "Analyse de Variance (ANOVA) & Test Post-Hoc de Tukey"),
+                tags$div(
+                  class = "mt-2",
+                  if (inherits(anova_val$anova, "flextable")) flextable::htmltools_value(anova_val$anova),
+                  tags$div(class = "my-3"),
+                  if (inherits(anova_val$tukey, "flextable")) flextable::htmltools_value(anova_val$tukey)
+                )
+              )
             }
           )
         })
@@ -211,12 +255,20 @@ mod_bivariate_server <- function(id, data_reactive) {
           for (item in results) {
             pred_name <- item$pred
             val <- item$value
+            anova_val <- item$anova
             doc <- officer::body_add_par(doc, paste("Comparaison :", pred_name, "vs", res_info$target), style = "heading 2")
             if (inherits(val, "flextable")) {
               doc <- flextable::body_add_flextable(doc, val)
             } else if (is.data.frame(val)) {
               ft <- flextable::theme_vanilla(flextable::flextable(val))
               doc <- flextable::body_add_flextable(doc, ft)
+            }
+
+            if (!is.null(anova_val)) {
+              doc <- officer::body_add_par(doc, "Tableau d'ANOVA à un facteur", style = "heading 3")
+              if (inherits(anova_val$anova, "flextable")) doc <- flextable::body_add_flextable(doc, anova_val$anova)
+              doc <- officer::body_add_par(doc, "Test post-hoc de Tukey (HSD)", style = "heading 3")
+              if (inherits(anova_val$tukey, "flextable")) doc <- flextable::body_add_flextable(doc, anova_val$tukey)
             }
             doc <- officer::body_add_par(doc, "", style = "Normal")
           }
