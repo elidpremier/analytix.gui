@@ -25,13 +25,7 @@ mod_import_ui <- function(id) {
       
       conditionalPanel(
         condition = sprintf("input['%s'] == 'file'", ns("data_source")),
-        fileInput(
-          ns("file"), 
-          "Glisser-déposer ou Choisir :",
-          accept = c(".xlsx", ".xls", ".csv", ".rds"),
-          buttonLabel = "Parcourir...",
-          placeholder = "Aucun fichier sélectionné"
-        ),
+        uiOutput(ns("file_input_container")),
         uiOutput(ns("excel_sheet_ui"))
       ),
       
@@ -98,6 +92,21 @@ mod_import_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
+    # Trigger to reset file input
+    reset_trigger <- reactiveVal(0)
+
+    # Dynamic fileInput container
+    output$file_input_container <- renderUI({
+      reset_trigger() # dependency
+      fileInput(
+        ns("file"),
+        "Glisser-déposer ou Choisir :",
+        accept = c(".xlsx", ".xls", ".csv", ".rds"),
+        buttonLabel = "Parcourir...",
+        placeholder = "Aucun fichier sélectionné"
+      )
+    })
+
     # 1. Excel sheet UI
     output$excel_sheet_ui <- renderUI({
       req(input$file)
@@ -139,6 +148,14 @@ mod_import_server <- function(id) {
     # 3. Cleaned Data
     cleaned_data <- reactiveVal(NULL)
     
+    # Observe Reset Event
+    observeEvent(input$reset_data, {
+      updateRadioButtons(session, "data_source", selected = "file")
+      reset_trigger(reset_trigger() + 1)
+      cleaned_data(NULL)
+      showNotification("Données réinitialisées avec succès !", type = "message")
+    })
+
     observe({
       df <- tryCatch(raw_data(), error = function(e) NULL)
       req(df)
@@ -271,7 +288,7 @@ mod_import_server <- function(id) {
         sym_var <- rlang::sym(var_nm)
         res <- tryCatch(analytix::detect_outliers(df, var = !!sym_var), error = function(e) NULL)
         if (!is.null(res) && !is.null(res$summary)) {
-          return(htmltools::HTML(flextable::htmltools_value(res$summary)))
+          return(flextable::htmltools_value(res$summary))
         }
       }
       

@@ -80,7 +80,11 @@ mod_bivariate_server <- function(id, data_reactive) {
     
     bivariate_res <- reactive({
       df <- data_reactive()
-      req(df, input$target_var, input$pred_vars)
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$target_var), "Veuillez sélectionner une variable cible (Outcome)."),
+        shiny::need(isTruthy(input$pred_vars) && length(input$pred_vars) > 0, "Veuillez sélectionner au moins une variable explicative.")
+      )
       
       target <- input$target_var
       preds <- input$pred_vars
@@ -92,19 +96,26 @@ mod_bivariate_server <- function(id, data_reactive) {
           if (exists("descr_by_group", where = asNamespace("analytix"))) {
             target_sym <- rlang::sym(target)
             
-            # Loop predictors and combine flextables or dataframes
             ft_list <- lapply(preds, function(p) {
               p_sym <- rlang::sym(p)
               res <- tryCatch(
                 analytix::descr_by_group(df, var = !!p_sym, by = !!target_sym),
                 error = function(e) NULL
               )
-              res
+              if (is.null(res)) {
+                # Fallback dataframe if descr_by_group fails
+                tb <- table(df[[p]], df[[target]])
+                res <- data.frame(
+                  `Variable/Modalité` = paste(p, "-", rownames(tb)),
+                  `N` = as.numeric(rowSums(tb)),
+                  `Test` = "Chi-Square",
+                  check.names = FALSE
+                )
+              }
+              list(pred = p, value = res)
             })
-            ft_list <- Filter(Negate(is.null), ft_list)
-            if (length(ft_list) > 0) {
-              return(ft_list[[1]]) # Returns primary flextable
-            }
+            ft_list <- Filter(function(x) !is.null(x$value), ft_list)
+            return(list(method = "group_comparison", type = "list", target = target, results = ft_list))
           }
           
           # Fallback group comparison summary
@@ -119,7 +130,8 @@ mod_bivariate_server <- function(id, data_reactive) {
               check.names = FALSE
             )
           })
-          do.call(rbind, res_list)
+          combined_df <- do.call(rbind, res_list)
+          return(list(method = "group_comparison", type = "df", target = target, results = combined_df))
           
         } else if (method == "or_table") {
           if (exists("bivariate_or_table", where = asNamespace("analytix"))) {
@@ -127,51 +139,94 @@ mod_bivariate_server <- function(id, data_reactive) {
               analytix::bivariate_or_table(df, outcome = target, exposures = preds),
               error = function(e) NULL
             )
-            if (!is.null(res)) return(res)
+            if (!is.null(res)) {
+              return(list(method = "or_table", type = "flextable", target = target, results = res))
+            }
           }
           
           # Fallback Odds Ratio calculation
-          data.frame(
+          res_df <- data.frame(
             Predictor = preds,
             Outcome = target,
             Odds_Ratio = "Généré via analytix::bivariate_or_table",
             IC_95 = "[ - ]"
           )
+          return(list(method = "or_table", type = "df", target = target, results = res_df))
         }
       }, error = function(e) {
-        data.frame(Erreur = paste("Erreur bivariée :", e$message))
+        err_df <- data.frame(Erreur = paste("Erreur bivariée :", e$message))
+        return(list(method = "error", type = "df", target = target, results = err_df))
       })
     })
     
     output$bivariate_results_ui <- renderUI({
-      res <- bivariate_res()
-      req(res)
+      res_info <- bivariate_res()
+      req(res_info)
       
-      if (inherits(res, "flextable")) {
-        htmltools::HTML(flextable::htmltools_value(res))
-      } else if (is.data.frame(res)) {
-        tableOutput(ns("bivariate_table"))
+      method <- res_info$method
+      type <- res_info$type
+      results <- res_info$results
+
+      if (method == "group_comparison" && type == "list") {
+        tag_list <- lapply(seq_along(results), function(i) {
+          item <- results[[i]]
+          pred_name <- item$pred
+          val <- item$value
+
+          tags$div(
+            class = "mb-4 p-3 border rounded bg-white",
+            tags$h5(class = "fw-bold text-slate-800 mb-3", paste("Comparaison :", pred_name, "vs", res_info$target)),
+            if (inherits(val, "flextable")) {
+              flextable::htmltools_value(val)
+            } else if (is.data.frame(val)) {
+              ft <- flextable::theme_vanilla(flextable::flextable(val))
+              flextable::htmltools_value(ft)
+            }
+          )
+        })
+        do.call(tagList, tag_list)
+      } else {
+        if (inherits(results, "flextable")) {
+          flextable::htmltools_value(results)
+        } else if (is.data.frame(results)) {
+          ft <- flextable::theme_vanilla(flextable::flextable(results))
+          flextable::htmltools_value(ft)
+        }
       }
     })
     
-    output$bivariate_table <- renderTable({
-      res <- bivariate_res()
-      req(is.data.frame(res))
-      res
-    }, striped = TRUE, hover = TRUE, bordered = TRUE)
-    
     # ⚡ EXPORT IMMÉDIAT HANDLERS
     output$dl_bivar_word <- downloadHandler(
-      filename = function() { paste0("Tableau_Bivarié_", input$target_var, ".docx") },
+      filename = function() { paste0("Tableau_Bivar_Complet_", input$target_var, ".docx") },
       content = function(file) {
-        res <- bivariate_res()
+        res_info <- bivariate_res()
         doc <- officer::read_docx()
-        doc <- officer::body_add_par(doc, paste("Analyse Bivariée - Outcome :", input$target_var), style = "heading 1")
-        if (inherits(res, "flextable")) {
-          doc <- flextable::body_add_flextable(doc, res)
-        } else if (is.data.frame(res)) {
-          ft <- flextable::theme_vanilla(flextable::flextable(res))
-          doc <- flextable::body_add_flextable(doc, ft)
+        doc <- officer::body_add_par(doc, paste("Analyse Bivariée - Variable Cible (Outcome) :", res_info$target), style = "heading 1")
+
+        method <- res_info$method
+        type <- res_info$type
+        results <- res_info$results
+
+        if (method == "group_comparison" && type == "list") {
+          for (item in results) {
+            pred_name <- item$pred
+            val <- item$value
+            doc <- officer::body_add_par(doc, paste("Comparaison :", pred_name, "vs", res_info$target), style = "heading 2")
+            if (inherits(val, "flextable")) {
+              doc <- flextable::body_add_flextable(doc, val)
+            } else if (is.data.frame(val)) {
+              ft <- flextable::theme_vanilla(flextable::flextable(val))
+              doc <- flextable::body_add_flextable(doc, ft)
+            }
+            doc <- officer::body_add_par(doc, "", style = "Normal")
+          }
+        } else {
+          if (inherits(results, "flextable")) {
+            doc <- flextable::body_add_flextable(doc, results)
+          } else if (is.data.frame(results)) {
+            ft <- flextable::theme_vanilla(flextable::flextable(results))
+            doc <- flextable::body_add_flextable(doc, ft)
+          }
         }
         print(doc, target = file)
       }
@@ -180,11 +235,32 @@ mod_bivariate_server <- function(id, data_reactive) {
     output$dl_bivar_csv <- downloadHandler(
       filename = function() { paste0("Tableau_Bivarié_", input$target_var, ".csv") },
       content = function(file) {
-        res <- bivariate_res()
-        if (inherits(res, "flextable")) {
-          write.csv(res$body$dataset, file, row.names = FALSE)
-        } else if (is.data.frame(res)) {
-          write.csv(res, file, row.names = FALSE)
+        res_info <- bivariate_res()
+        method <- res_info$method
+        type <- res_info$type
+        results <- res_info$results
+
+        if (method == "group_comparison" && type == "list") {
+          df_list <- lapply(results, function(item) {
+            val <- item$value
+            if (inherits(val, "flextable")) {
+              df <- val$body$dataset
+            } else {
+              df <- val
+            }
+            if (!is.null(df) && nrow(df) > 0) {
+              df$Predictor_Variable <- item$pred
+            }
+            df
+          })
+          combined <- dplyr::bind_rows(df_list)
+          write.csv(combined, file, row.names = FALSE)
+        } else {
+          if (inherits(results, "flextable")) {
+            write.csv(results$body$dataset, file, row.names = FALSE)
+          } else if (is.data.frame(results)) {
+            write.csv(results, file, row.names = FALSE)
+          }
         }
       }
     )

@@ -95,7 +95,10 @@ mod_specialized_server <- function(id, data_reactive) {
     # 1. Likert logic
     likert_res <- reactive({
       df <- data_reactive()
-      req(df, input$likert_var)
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$likert_var), "Veuillez sélectionner une variable Likert.")
+      )
       var_nm <- input$likert_var
       sym_v <- rlang::sym(var_nm)
       
@@ -113,7 +116,7 @@ mod_specialized_server <- function(id, data_reactive) {
       res <- likert_res()
       req(res)
       if (inherits(res, "flextable")) {
-        htmltools::HTML(flextable::htmltools_value(res))
+        flextable::htmltools_value(res)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_likert"))
       }
@@ -123,7 +126,10 @@ mod_specialized_server <- function(id, data_reactive) {
     # 2. Multi choice logic
     multi_res <- reactive({
       df <- data_reactive()
-      req(df, input$multi_vars)
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$multi_vars) && length(input$multi_vars) > 0, "Veuillez sélectionner des variables pour les choix multiples.")
+      )
       vars <- input$multi_vars
       
       if (exists("descr_multi_choice", where = asNamespace("analytix"))) {
@@ -139,7 +145,7 @@ mod_specialized_server <- function(id, data_reactive) {
       res <- multi_res()
       req(res)
       if (inherits(res, "flextable")) {
-        htmltools::HTML(flextable::htmltools_value(res))
+        flextable::htmltools_value(res)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_multi"))
       }
@@ -149,7 +155,10 @@ mod_specialized_server <- function(id, data_reactive) {
     # 3. Heatmap logic
     current_hm_plot <- reactive({
       df <- data_reactive()
-      req(df, input$heatmap_vars, length(input$heatmap_vars) >= 2)
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$heatmap_vars) && length(input$heatmap_vars) >= 2, "Veuillez sélectionner au moins 2 variables numériques pour la heatmap.")
+      )
       vars <- input$heatmap_vars
       
       if (exists("plot_heatmap_matrix", where = asNamespace("analytix"))) {

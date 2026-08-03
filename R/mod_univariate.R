@@ -122,7 +122,10 @@ mod_univariate_server <- function(id, data_reactive) {
     # 1. Compute summary table using analytix
     res_table <- reactive({
       df <- data_reactive()
-      req(df, input$select_var)
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$select_var), "Veuillez sélectionner une variable à analyser.")
+      )
       
       var_name <- input$select_var
       type <- effective_type()
@@ -169,7 +172,7 @@ mod_univariate_server <- function(id, data_reactive) {
       res <- res_table()
       req(res)
       if (inherits(res, "flextable")) {
-        htmltools::HTML(flextable::htmltools_value(res))
+        flextable::htmltools_value(res)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_summary_table"))
       }
@@ -184,7 +187,10 @@ mod_univariate_server <- function(id, data_reactive) {
     # 2. Render Plot
     current_plot <- reactive({
       df <- data_reactive()
-      req(df, input$select_var)
+      shiny::validate(
+        shiny::need(!is.null(df) && nrow(df) > 0, "Veuillez d'abord importer un jeu de données dans l'onglet 'Données & Libellés'."),
+        shiny::need(isTruthy(input$select_var), "Veuillez sélectionner une variable à analyser.")
+      )
       
       var_name <- input$select_var
       type <- effective_type()
