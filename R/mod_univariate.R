@@ -3,6 +3,32 @@
 #' @param id Identifiant du module Shiny
 #' @param data_reactive Reactive returning the cleaned data.frame
 
+# Helpers locally defined to avoid scoping errors
+get_flextable <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  if (inherits(obj, "flextable")) {
+    return(obj)
+  }
+  if (is.list(obj) && !is.null(obj$flextable) && inherits(obj$flextable, "flextable")) {
+    return(obj$flextable)
+  }
+  return(NULL)
+}
+
+get_dataframe <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  if (is.data.frame(obj)) {
+    return(obj)
+  }
+  if (is.list(obj) && !is.null(obj$data) && is.data.frame(obj$data)) {
+    return(obj$data)
+  }
+  if (is.list(obj) && !is.null(obj$body$dataset) && is.data.frame(obj$body$dataset)) {
+    return(obj$body$dataset)
+  }
+  return(NULL)
+}
+
 mod_univariate_ui <- function(id) {
   ns <- NS(id)
   
@@ -56,6 +82,36 @@ mod_univariate_ui <- function(id) {
           checkboxInput(ns("show_valid"), "Afficher l'effectif valide", value = FALSE),
           checkboxInput(ns("show_skewness"), "Afficher l'asymétrie (skewness)", value = FALSE),
           textInput(ns("header_color"), "Couleur de l'en-tête (Hex) :", value = "#0284c7"),
+
+          tags$hr(),
+          tags$h6(icon("image", class = "me-1"), "Options Graphiques"),
+          selectInput(
+            ns("plot_type"),
+            "Type de graphique :",
+            choices = c(
+              "🤖 Détection Automatique" = "auto",
+              "📊 Histogramme (Numérique)" = "histogram",
+              "📈 Courbe de Densité (Numérique)" = "density",
+              "📦 Boîte à Moustaches (Boxplot)" = "boxplot",
+              "📶 Diagramme en Barres (Qualitatif)" = "bar",
+              "🍕 Camembert" = "pie"
+            ),
+            selected = "auto"
+          ),
+          textInput(ns("plot_title"), "Titre personnalisé :", value = ""),
+          textInput(ns("plot_color"), "Couleur principale (Hex) :", value = "#3366CC"),
+          selectInput(
+            ns("plot_theme"),
+            "Thème du graphique :",
+            choices = c(
+              "Minimaliste" = "minimal",
+              "Classique" = "classic",
+              "Clair" = "light"
+            ),
+            selected = "minimal"
+          ),
+          checkboxInput(ns("plot_horiz"), "Orientation Horizontale (Barres)", value = FALSE),
+          checkboxInput(ns("plot_labels"), "Afficher les étiquettes (%)", value = TRUE),
 
           tags$hr(),
           tags$div(
@@ -359,30 +415,147 @@ mod_univariate_server <- function(id, data_reactive) {
       )
       
       var_name <- input$select_var
-      type <- effective_type()
       sym_var <- rlang::sym(var_name)
+      col_data <- df[[var_name]]
       
-      if (exists("plot_distribution", where = asNamespace("analytix"))) {
-        p <- try(analytix::plot_distribution(df, var = !!sym_var), silent = TRUE)
-        if (!inherits(p, "try-error") && inherits(p, "ggplot")) {
-          return(p)
+      # Determine requested plot type
+      requested_type <- input$plot_type
+      if (requested_type == "auto") {
+        if (is.numeric(col_data)) {
+          unique_vals <- length(unique(stats::na.omit(col_data)))
+          requested_type <- if (unique_vals <= 15) "bar" else "histogram"
+        } else {
+          requested_type <- "bar"
         }
       }
       
-      col <- df[[var_name]]
-      if (type == "numeric") {
-        ggplot2::ggplot(df, ggplot2::aes(x = .data[[var_name]])) +
-          ggplot2::geom_histogram(fill = "#0284c7", color = "white", bins = 20, alpha = 0.85) +
-          ggplot2::theme_minimal(base_size = 14) +
-          ggplot2::labs(title = paste("Distribution de", var_name), x = var_name, y = "Fréquence")
-      } else {
-        ggplot2::ggplot(df, ggplot2::aes(x = factor(.data[[var_name]]), fill = factor(.data[[var_name]]))) +
-          ggplot2::geom_bar(alpha = 0.85, show.legend = FALSE) +
-          ggplot2::scale_fill_brewer(palette = "Set2") +
-          ggplot2::theme_minimal(base_size = 14) +
-          ggplot2::labs(title = paste("Répartition de", var_name), x = var_name, y = "Effectif") +
-          ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
+      # Graph Title
+      custom_title <- input$plot_title
+      if (is.null(custom_title) || nchar(trimws(custom_title)) == 0) {
+        custom_title <- paste("Distribution de :", var_name)
       }
+
+      # Plot Color
+      plot_color <- input$plot_color
+      if (is.null(plot_color) || nchar(trimws(plot_color)) == 0) {
+        plot_color <- "#3366CC"
+      }
+
+      # Plot Theme
+      plot_theme_name <- input$plot_theme
+      thm <- switch(plot_theme_name,
+                    "minimal" = ggplot2::theme_minimal(base_size = 14),
+                    "classic" = ggplot2::theme_classic(base_size = 14),
+                    "light" = ggplot2::theme_light(base_size = 14),
+                    ggplot2::theme_minimal(base_size = 14))
+
+      p <- NULL
+
+      # 1. Pie Chart
+      if (requested_type == "pie") {
+        if (exists("plot_pie_chart", where = asNamespace("analytix"))) {
+          p <- tryCatch({
+            analytix::plot_pie_chart(df, x = !!sym_var, title = custom_title)
+          }, error = function(e) NULL)
+        }
+
+        if (is.null(p)) {
+          # Fallback pie chart
+          t_val <- table(col_data, useNA = "no")
+          df_plot <- data.frame(modalite = names(t_val), effectif = as.numeric(t_val), stringsAsFactors = FALSE)
+          n_total <- sum(df_plot$effectif)
+          df_plot$pct <- round(100 * df_plot$effectif / n_total, 1)
+          df_plot$label <- ifelse(df_plot$pct >= 5, paste0(df_plot$modalite, "\n", format(df_plot$pct, nsmall = 1, decimal.mark = ","), "%"), "")
+
+          p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = "", y = effectif, fill = modalite)) +
+            ggplot2::geom_col(width = 1, color = "white", linewidth = 0.5) +
+            ggplot2::geom_text(
+              ggplot2::aes(label = label),
+              position = ggplot2::position_stack(vjust = 0.5),
+              size = 3.8, color = "black", fontface = "bold"
+            ) +
+            ggplot2::coord_polar(theta = "y") +
+            ggplot2::labs(title = custom_title, fill = var_name) +
+            ggplot2::theme_void(base_size = 14) +
+            ggplot2::theme(
+              plot.title = ggplot2::element_text(face = "bold", size = 13, hjust = 0.5),
+              legend.position = "right"
+            ) +
+            ggplot2::scale_fill_brewer(palette = "Set2")
+        }
+      }
+      # 2. Bar chart / bar plot
+      else if (requested_type == "bar") {
+        if (exists("plot_barplot", where = asNamespace("analytix"))) {
+          p <- tryCatch({
+            # Try package barplot
+            analytix::plot_barplot(df, x = !!sym_var, title = custom_title, col = plot_color, horiz = isTRUE(input$plot_horiz), show_labels = isTRUE(input$plot_labels))
+          }, error = function(e) NULL)
+        }
+
+        if (is.null(p)) {
+          t_val <- table(col_data, useNA = "no")
+          df_plot <- data.frame(modalite = names(t_val), effectif = as.numeric(t_val), stringsAsFactors = FALSE)
+          n_total <- sum(df_plot$effectif)
+          df_plot$pct <- round(100 * df_plot$effectif / n_total, 1)
+          df_plot$etiquette <- paste0(format(df_plot$pct, nsmall = 1, decimal.mark = ","), "%")
+
+          if (isTRUE(input$plot_horiz)) {
+            df_plot <- df_plot[order(df_plot$effectif), ]
+            p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = effectif, y = stats::reorder(modalite, effectif))) +
+              ggplot2::geom_col(fill = plot_color, width = 0.7) +
+              ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.18))) +
+              ggplot2::labs(title = custom_title, subtitle = paste0("N = ", n_total), x = "Effectif", y = NULL)
+            if (isTRUE(input$plot_labels)) {
+              p <- p + ggplot2::geom_text(ggplot2::aes(label = etiquette), hjust = -0.2, size = 3.5, fontface = "bold")
+            }
+          } else {
+            df_plot <- df_plot[order(df_plot$effectif, decreasing = TRUE), ]
+            p <- ggplot2::ggplot(df_plot, ggplot2::aes(x = stats::reorder(modalite, -effectif), y = effectif)) +
+              ggplot2::geom_col(fill = plot_color, width = 0.7) +
+              ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0, 0.18))) +
+              ggplot2::labs(title = custom_title, subtitle = paste0("N = ", n_total), x = NULL, y = "Effectif")
+            if (isTRUE(input$plot_labels)) {
+              p <- p + ggplot2::geom_text(ggplot2::aes(label = etiquette), vjust = -0.5, size = 3.5, fontface = "bold")
+            }
+          }
+          p <- p + thm + ggplot2::theme(plot.title = ggplot2::element_text(face = "bold"))
+        }
+      }
+      # 3. Numeric plot types (Histogram, Density, Boxplot)
+      else {
+        if (exists("plot_distribution", where = asNamespace("analytix"))) {
+          p <- tryCatch({
+            analytix::plot_distribution(df, var = !!sym_var, type = requested_type, fill = plot_color, theme = plot_theme_name)
+          }, error = function(e) NULL)
+        }
+
+        if (is.null(p) || inherits(p, "try-error")) {
+          # Manual Fallback
+          p <- ggplot2::ggplot(data.frame(val = col_data), ggplot2::aes(x = val))
+
+          if (requested_type == "histogram") {
+            p <- p + ggplot2::geom_histogram(fill = plot_color, color = "white", bins = 30, alpha = 0.8) +
+              ggplot2::labs(y = "Effectif")
+          } else if (requested_type == "density") {
+            p <- p + ggplot2::geom_density(fill = plot_color, alpha = 0.5) +
+              ggplot2::labs(y = "Densité")
+          } else if (requested_type == "boxplot") {
+            p <- ggplot2::ggplot(data.frame(val = col_data), ggplot2::aes(y = val)) +
+              ggplot2::geom_boxplot(fill = plot_color, alpha = 0.8) +
+              ggplot2::labs(x = "")
+          }
+
+          p <- p + thm +
+            ggplot2::labs(title = custom_title, x = var_name) +
+            ggplot2::theme(plot.title = ggplot2::element_text(face = "bold"))
+        } else {
+          # Apply the custom title if retrieved from plot_distribution
+          p <- p + ggplot2::labs(title = custom_title)
+        }
+      }
+
+      return(p)
     })
     
     output$univariate_plot <- renderPlot({
