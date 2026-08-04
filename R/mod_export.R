@@ -26,7 +26,8 @@ mod_export_ui <- function(id) {
       tags$h6("Sections à Inclure :"),
       checkboxInput(ns("inc_summary"), " Synthèse du Jeu de Données", value = TRUE),
       checkboxInput(ns("inc_missing"), " Rapport sur les Données Manquantes", value = TRUE),
-      checkboxInput(ns("inc_univar"), " Analyses Univariées", value = TRUE),
+      checkboxInput(ns("inc_global_univar"), " Tableau Descriptif Global", value = TRUE),
+      checkboxInput(ns("inc_univar"), " Analyses Univariées (par variable)", value = TRUE),
       checkboxInput(ns("inc_bivar"), " Analyses Bivariées", value = TRUE),
       checkboxInput(ns("inc_multiv"), " Régression Logistique Multivariée", value = TRUE),
       checkboxInput(ns("inc_spec"), " Analyses Spécialisées (Likert, Multi-choix)", value = TRUE),
@@ -107,7 +108,7 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
         }
         shiny::withProgress(message = 'Génération du rapport Word global...', value = 0, {
           
-          shiny::incProgress(0.2, detail = "Initialisation du document...")
+          shiny::incProgress(0.1, detail = "Initialisation du document...")
           
           doc <- officer::read_docx()
           
@@ -117,7 +118,7 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
           doc <- officer::body_add_par(doc, paste("Auteur :", input$report_author, "| Organisme :", input$report_institution, "| Date :", Sys.Date()), style = "Normal")
           doc <- officer::body_add_par(doc, "", style = "Normal")
           
-          shiny::incProgress(0.4, detail = "Ajout de la synthèse des données...")
+          shiny::incProgress(0.2, detail = "Ajout de la synthèse des données...")
           
           # 1. Summary Section
           if (isTRUE(input$inc_summary) && !is.null(df)) {
@@ -150,7 +151,28 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
             doc <- officer::body_add_par(doc, "", style = "Normal")
           }
 
-          shiny::incProgress(0.6, detail = "Ajout des tableaux univariés...")
+          shiny::incProgress(0.3, detail = "Ajout du Tableau Descriptif Global...")
+
+          # 1.8. Global Descriptive Table Section
+          if (isTRUE(input$inc_global_univar)) {
+            u_res <- tryCatch(univar_reactive(), error = function(e) NULL)
+            if (!is.null(u_res) && !is.null(u_res$global_descriptive)) {
+              doc <- officer::body_add_par(doc, "1.3. Tableau Descriptif Global", style = "heading 2")
+              for (var_name in names(u_res$global_descriptive)) {
+                obj <- u_res$global_descriptive[[var_name]]
+                ft <- get_flextable(obj)
+                doc <- officer::body_add_par(doc, paste("Description de :", var_name), style = "heading 3")
+                if (!is.null(ft)) {
+                  doc <- flextable::body_add_flextable(doc, ft)
+                } else {
+                  doc <- officer::body_add_par(doc, "Tableau non disponible", style = "Normal")
+                }
+                doc <- officer::body_add_par(doc, "", style = "Normal")
+              }
+            }
+          }
+
+          shiny::incProgress(0.5, detail = "Ajout des tableaux univariés...")
           
           # 2. Univariate Section
           if (isTRUE(input$inc_univar)) {
@@ -159,17 +181,24 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               doc <- officer::body_add_par(doc, "2. Analyse Univariée", style = "heading 1")
               doc <- officer::body_add_par(doc, paste("Variable analysée :", u_res$var), style = "heading 2")
               
-              if (inherits(u_res$table, "flextable")) {
-                doc <- flextable::body_add_flextable(doc, u_res$table)
-              } else if (is.data.frame(u_res$table)) {
-                ft_u <- flextable::theme_vanilla(flextable::flextable(u_res$table))
-                doc <- flextable::body_add_flextable(doc, ft_u)
+              ft <- get_flextable(u_res$table)
+              if (!is.null(ft)) {
+                doc <- flextable::body_add_flextable(doc, ft)
+              } else {
+                df_u <- get_dataframe(u_res$table)
+                if (!is.null(df_u)) {
+                  ft_u <- flextable::theme_vanilla(flextable::flextable(df_u))
+                  doc <- flextable::body_add_flextable(doc, ft_u)
+                } else if (is.data.frame(u_res$table)) {
+                  ft_u <- flextable::theme_vanilla(flextable::flextable(u_res$table))
+                  doc <- flextable::body_add_flextable(doc, ft_u)
+                }
               }
               doc <- officer::body_add_par(doc, "", style = "Normal")
             }
           }
           
-          shiny::incProgress(0.8, detail = "Ajout des tableaux bivariés...")
+          shiny::incProgress(0.7, detail = "Ajout des tableaux bivariés...")
           
           # 3. Bivariate Section
           if (isTRUE(input$inc_bivar)) {
@@ -189,27 +218,45 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
                   val <- item$value
                   anova_val <- item$anova
                   doc <- officer::body_add_par(doc, paste("Comparaison :", pred_name, "vs", b_res$target), style = "heading 3")
-                  if (inherits(val, "flextable")) {
-                    doc <- flextable::body_add_flextable(doc, val)
-                  } else if (is.data.frame(val)) {
-                    ft <- flextable::theme_vanilla(flextable::flextable(val))
-                    doc <- flextable::body_add_flextable(doc, ft)
+
+                  ft_val <- get_flextable(val)
+                  if (!is.null(ft_val)) {
+                    doc <- flextable::body_add_flextable(doc, ft_val)
+                  } else {
+                    df_val <- get_dataframe(val)
+                    if (!is.null(df_val)) {
+                      ft <- flextable::theme_vanilla(flextable::flextable(df_val))
+                      doc <- flextable::body_add_flextable(doc, ft)
+                    } else if (is.data.frame(val)) {
+                      ft <- flextable::theme_vanilla(flextable::flextable(val))
+                      doc <- flextable::body_add_flextable(doc, ft)
+                    }
                   }
 
                   if (!is.null(anova_val)) {
                     doc <- officer::body_add_par(doc, "Tableau d'ANOVA à un facteur", style = "heading 4")
-                    if (inherits(anova_val$anova, "flextable")) doc <- flextable::body_add_flextable(doc, anova_val$anova)
+                    ft_anova <- get_flextable(anova_val$anova)
+                    if (!is.null(ft_anova)) doc <- flextable::body_add_flextable(doc, ft_anova)
+
                     doc <- officer::body_add_par(doc, "Test post-hoc de Tukey (HSD)", style = "heading 4")
-                    if (inherits(anova_val$tukey, "flextable")) doc <- flextable::body_add_flextable(doc, anova_val$tukey)
+                    ft_tukey <- get_flextable(anova_val$tukey)
+                    if (!is.null(ft_tukey)) doc <- flextable::body_add_flextable(doc, ft_tukey)
                   }
                   doc <- officer::body_add_par(doc, "", style = "Normal")
                 }
               } else {
-                if (inherits(results, "flextable")) {
-                  doc <- flextable::body_add_flextable(doc, results)
-                } else if (is.data.frame(results)) {
-                  ft_b <- flextable::theme_vanilla(flextable::flextable(results))
-                  doc <- flextable::body_add_flextable(doc, ft_b)
+                ft_res <- get_flextable(results)
+                if (!is.null(ft_res)) {
+                  doc <- flextable::body_add_flextable(doc, ft_res)
+                } else {
+                  df_res <- get_dataframe(results)
+                  if (!is.null(df_res)) {
+                    ft_b <- flextable::theme_vanilla(flextable::flextable(df_res))
+                    doc <- flextable::body_add_flextable(doc, ft_b)
+                  } else if (is.data.frame(results)) {
+                    ft_b <- flextable::theme_vanilla(flextable::flextable(results))
+                    doc <- flextable::body_add_flextable(doc, ft_b)
+                  }
                 }
                 doc <- officer::body_add_par(doc, "", style = "Normal")
               }
@@ -224,15 +271,24 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               res_info <- b_res$res
               results <- res_info$results
 
-              if (inherits(results, "flextable")) {
-                doc <- flextable::body_add_flextable(doc, results)
-              } else if (is.data.frame(results)) {
-                ft_mult <- flextable::theme_vanilla(flextable::flextable(results))
-                doc <- flextable::body_add_flextable(doc, ft_mult)
+              ft_res <- get_flextable(results)
+              if (!is.null(ft_res)) {
+                doc <- flextable::body_add_flextable(doc, ft_res)
+              } else {
+                df_res <- get_dataframe(results)
+                if (!is.null(df_res)) {
+                  ft_mult <- flextable::theme_vanilla(flextable::flextable(df_res))
+                  doc <- flextable::body_add_flextable(doc, ft_mult)
+                } else if (is.data.frame(results)) {
+                  ft_mult <- flextable::theme_vanilla(flextable::flextable(results))
+                  doc <- flextable::body_add_flextable(doc, ft_mult)
+                }
               }
               doc <- officer::body_add_par(doc, "", style = "Normal")
             }
           }
+
+          shiny::incProgress(0.9, detail = "Ajout des analyses spécialisées...")
 
           # 4. Specialized Section
           if (isTRUE(input$inc_spec)) {
@@ -241,14 +297,26 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
               doc <- officer::body_add_par(doc, "4. Analyses Spécialisées", style = "heading 1")
               if (!is.null(s_res$likert)) {
                 doc <- officer::body_add_par(doc, "Échelle de Likert", style = "heading 2")
-                if (inherits(s_res$likert, "flextable")) doc <- flextable::body_add_flextable(doc, s_res$likert)
-                else if (is.data.frame(s_res$likert)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$likert)))
+                ft_likert <- get_flextable(s_res$likert)
+                if (!is.null(ft_likert)) {
+                  doc <- flextable::body_add_flextable(doc, ft_likert)
+                } else {
+                  df_likert <- get_dataframe(s_res$likert)
+                  if (!is.null(df_likert)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(df_likert)))
+                  else if (is.data.frame(s_res$likert)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$likert)))
+                }
                 doc <- officer::body_add_par(doc, "", style = "Normal")
               }
               if (!is.null(s_res$multi)) {
                 doc <- officer::body_add_par(doc, "Analyse des Réponses Multiples", style = "heading 2")
-                if (inherits(s_res$multi, "flextable")) doc <- flextable::body_add_flextable(doc, s_res$multi)
-                else if (is.data.frame(s_res$multi)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$multi)))
+                ft_multi <- get_flextable(s_res$multi)
+                if (!is.null(ft_multi)) {
+                  doc <- flextable::body_add_flextable(doc, ft_multi)
+                } else {
+                  df_multi <- get_dataframe(s_res$multi)
+                  if (!is.null(df_multi)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(df_multi)))
+                  else if (is.data.frame(s_res$multi)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(s_res$multi)))
+                }
                 doc <- officer::body_add_par(doc, "", style = "Normal")
               }
             }
@@ -260,8 +328,14 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
             if (!is.null(s_res) && !is.null(s_res$correlation_matrix)) {
               doc <- officer::body_add_par(doc, "4.2. Matrice de Corrélations complète", style = "heading 2")
               res <- s_res$correlation_matrix
-              if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
-              else if (is.data.frame(res)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(res)))
+              ft_cor <- get_flextable(res)
+              if (!is.null(ft_cor)) {
+                doc <- flextable::body_add_flextable(doc, ft_cor)
+              } else {
+                df_cor <- get_dataframe(res)
+                if (!is.null(df_cor)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(df_cor)))
+                else if (is.data.frame(res)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(res)))
+              }
               doc <- officer::body_add_par(doc, "", style = "Normal")
             }
           }
@@ -272,8 +346,14 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
             if (!is.null(s_res) && !is.null(s_res$diagnostic)) {
               doc <- officer::body_add_par(doc, "4.3. Performance Diagnostique du Test", style = "heading 2")
               res <- s_res$diagnostic
-              if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
-              else if (is.data.frame(res)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(res)))
+              ft_diag <- get_flextable(res)
+              if (!is.null(ft_diag)) {
+                doc <- flextable::body_add_flextable(doc, ft_diag)
+              } else {
+                df_diag <- get_dataframe(res)
+                if (!is.null(df_diag)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(df_diag)))
+                else if (is.data.frame(res)) doc <- flextable::body_add_flextable(doc, flextable::theme_vanilla(flextable::flextable(res)))
+              }
               doc <- officer::body_add_par(doc, "", style = "Normal")
             }
           }

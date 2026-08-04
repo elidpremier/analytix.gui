@@ -21,6 +21,32 @@ safe_icon <- function(name, class = "", fa_fallback = "circle") {
   }
 }
 
+# Robust helpers to extract flextables from custom package classes globally
+get_flextable <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  if (inherits(obj, "flextable")) {
+    return(obj)
+  }
+  if (is.list(obj) && !is.null(obj$flextable) && inherits(obj$flextable, "flextable")) {
+    return(obj$flextable)
+  }
+  return(NULL)
+}
+
+get_dataframe <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  if (is.data.frame(obj)) {
+    return(obj)
+  }
+  if (is.list(obj) && !is.null(obj$data) && is.data.frame(obj$data)) {
+    return(obj$data)
+  }
+  if (is.list(obj) && !is.null(obj$body$dataset) && is.data.frame(obj$body$dataset)) {
+    return(obj$body$dataset)
+  }
+  return(NULL)
+}
+
 # --- Chargement de analytix ---
 if (requireNamespace("analytix", quietly = TRUE)) {
   library(analytix)
