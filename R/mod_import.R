@@ -89,8 +89,36 @@ mod_import_ui <- function(id) {
             uiOutput(ns("labels_editor_ui"))
           )
         ),
+
+        # Tab 3: Variable Recoding (Recodage de Variables)
+        bslib::nav_panel(
+          title = tags$span(icon("exchange-alt"), " Recodage de Variables"),
+          tags$div(
+            class = "p-3",
+            tags$p(class = "text-muted", "Modifiez, regroupez ou discrétisez vos variables à l'aide des outils du package analytix. Ces modifications s'appliqueront à toutes les analyses et exports de l'application."),
+
+            # Recoding UI layout
+            fluidRow(
+              column(4,
+                selectInput(ns("recode_var"), "Variable à recoder :", choices = NULL),
+                selectInput(ns("recode_method"), "Méthode de recodage :",
+                            choices = c(
+                              "Recodage simple (quick_code)" = "quick",
+                              "Regroupement de modalités (collapse_categories)" = "collapse",
+                              "Découper en classes (categorize_numeric)" = "categorize"
+                            ))
+              ),
+              column(8,
+                # Dynamic UI for each method
+                uiOutput(ns("recode_method_ui")),
+                tags$hr(),
+                actionButton(ns("btn_apply_recode"), "Appliquer le Recodage", class = "btn btn-success w-100")
+              )
+            )
+          )
+        ),
         
-        # Tab 3: Outliers Diagnostic
+        # Tab 4: Outliers Diagnostic
         bslib::nav_panel(
           title = tags$span(icon("search"), " Valeurs Aberrantes (Outliers)"),
           tags$div(
@@ -100,7 +128,7 @@ mod_import_ui <- function(id) {
           )
         ),
         
-        # Tab 4: Missing Values
+        # Tab 5: Missing Values
         bslib::nav_panel(
           title = tags$span(icon("exclamation-triangle"), " Synthèse des Manquants"),
           uiOutput(ns("missing_summary_ui"))
@@ -214,6 +242,182 @@ mod_import_server <- function(id) {
       num_cols <- names(df)[sapply(df, is.numeric)]
       updateSelectInput(session, "outlier_var", choices = num_cols)
       updateSelectInput(session, "adv_clean_col", choices = names(df))
+      updateSelectInput(session, "recode_var", choices = names(df))
+    })
+
+    # Recoding Dynamic UI Server Logic
+    output$recode_method_ui <- renderUI({
+      req(input$recode_var, input$recode_method)
+      df <- cleaned_data()
+      req(df)
+      var_nm <- input$recode_var
+      method <- input$recode_method
+
+      if (method == "quick") {
+        vals <- unique(df[[var_nm]])
+        vals <- vals[!is.na(vals)]
+
+        inputs <- lapply(vals, function(v) {
+          textInput(ns(paste0("quick_val_", gsub("[^a-zA-Z0-9_]", "_", as.character(v)))), label = paste("Ancienne valeur :", v), value = as.character(v))
+        })
+
+        tagList(
+          tags$h6("Recodage des valeurs individuelles :"),
+          tags$div(style = "max-height: 250px; overflow-y: auto;", inputs),
+          selectInput(ns("quick_to"), "Convertir en :", choices = c("Caractère" = "character", "Facteur" = "factor", "Type d'origine" = "keep")),
+          textInput(ns("quick_na"), "Remplacer les NA par (optionnel) :", value = "")
+        )
+      } else if (method == "collapse") {
+        vals <- unique(df[[var_nm]])
+        vals <- vals[!is.na(vals)]
+
+        tagList(
+          tags$h6("Regroupement de modalités :"),
+          textInput(ns("collapse_new_name"), "Nouveau nom de la catégorie regroupée :", placeholder = "ex: Groupe A"),
+          selectInput(ns("collapse_old_vals"), "Modalités d'origine à regrouper :", choices = vals, multiple = TRUE),
+          checkboxInput(ns("collapse_keep_na"), "Conserver les NA", value = TRUE),
+          textInput(ns("collapse_other_label"), "Label pour les modalités non regroupées (laisser vide pour les garder inchangées) :", value = "")
+        )
+      } else if (method == "categorize") {
+        tagList(
+          tags$h6("Découpage de variable numérique en classes :"),
+          textInput(ns("categorize_breaks"), "Seuils des classes (ex: 0, 18, 35, 50, 100 ou un nombre entier de classes) :", placeholder = "ex: 0, 18, 35, 50, 100"),
+          textInput(ns("categorize_labels"), "Libellés des classes (séparés par des virgules, optionnel) :", placeholder = "ex: Enfant, Jeune adulte, Adulte, Senior"),
+          checkboxInput(ns("categorize_as_factor"), "Retourner un facteur", value = TRUE)
+        )
+      }
+    })
+
+    # Observe Recode Action Button
+    observeEvent(input$btn_apply_recode, {
+      df <- cleaned_data()
+      req(df, input$recode_var, input$recode_method)
+      var_nm <- input$recode_var
+      method <- input$recode_method
+
+      tryCatch({
+        if (method == "quick") {
+          vals <- unique(df[[var_nm]])
+          vals <- vals[!is.na(vals)]
+
+          # Collect the mappings
+          recodes <- list()
+          for (v in vals) {
+            new_v <- input[[paste0("quick_val_", gsub("[^a-zA-Z0-9_]", "_", as.character(v)))]]
+            if (!is.null(new_v) && nchar(trimws(new_v)) > 0) {
+              recodes[[as.character(v)]] <- trimws(new_v)
+            }
+          }
+
+          na_val <- input$quick_na
+          if (is.null(na_val) || nchar(trimws(na_val)) == 0) na_val <- NULL
+
+          to_type <- input$quick_to
+
+          if (length(recodes) > 0) {
+            if (exists("quick_code", where = asNamespace("analytix"))) {
+              # Call quick_code from package
+              args <- c(list(data = df, var = as.name(var_nm)), recodes, list(.na = na_val, to = to_type))
+              df <- do.call(analytix::quick_code, args)
+            } else {
+              # Fallback R code
+              vec <- df[[var_nm]]
+              char_vec <- as.character(vec)
+              for (old_val in names(recodes)) {
+                char_vec[char_vec == old_val] <- recodes[[old_val]]
+              }
+              if (!is.null(na_val)) {
+                char_vec[is.na(vec)] <- na_val
+              }
+              if (to_type == "factor") {
+                df[[var_nm]] <- factor(char_vec)
+              } else {
+                df[[var_nm]] <- char_vec
+              }
+            }
+            cleaned_data(as.data.frame(df))
+            showNotification("Recodage simple appliqué avec succès !", type = "message")
+          }
+
+        } else if (method == "collapse") {
+          new_name <- trimws(input$collapse_new_name)
+          old_vals <- input$collapse_old_vals
+
+          shiny::validate(
+            shiny::need(nchar(new_name) > 0, "Veuillez entrer un nouveau nom de catégorie."),
+            shiny::need(length(old_vals) > 0, "Veuillez sélectionner au moins une modalité à regrouper.")
+          )
+
+          groups <- list()
+          groups[[new_name]] <- old_vals
+
+          other_lbl <- trimws(input$collapse_other_label)
+          if (nchar(other_lbl) == 0) other_lbl <- NULL
+
+          keep_na <- isTRUE(input$collapse_keep_na)
+
+          if (exists("collapse_categories", where = asNamespace("analytix"))) {
+            df <- analytix::collapse_categories(df, var = !!rlang::sym(var_nm), groups = groups, keep_na = keep_na, other_label = other_lbl)
+          } else {
+            # Fallback
+            vec <- df[[var_nm]]
+            char_vec <- as.character(vec)
+            char_vec[char_vec %in% old_vals] <- new_name
+            if (!keep_na) {
+              char_vec[is.na(char_vec)] <- ifelse(is.null(other_lbl), "Autre", other_lbl)
+            }
+            if (!is.null(other_lbl)) {
+              char_vec[char_vec != new_name & !is.na(char_vec)] <- other_lbl
+            }
+            df[[var_nm]] <- factor(char_vec)
+          }
+          cleaned_data(as.data.frame(df))
+          showNotification("Regroupement de modalités appliqué avec succès !", type = "message")
+
+        } else if (method == "categorize") {
+          breaks_str <- trimws(input$categorize_breaks)
+          labels_str <- trimws(input$categorize_labels)
+
+          shiny::validate(
+            shiny::need(nchar(breaks_str) > 0, "Veuillez spécifier des seuils.")
+          )
+
+          # Parse breaks
+          breaks_split <- strsplit(breaks_str, ",")[[1]]
+          breaks_split <- trimws(breaks_split)
+
+          if (length(breaks_split) == 1 && !is.na(as.integer(breaks_split))) {
+            breaks_val <- as.integer(breaks_split)
+          } else {
+            breaks_val <- as.numeric(breaks_split)
+            shiny::validate(
+              shiny::need(!any(is.na(breaks_val)), "Les seuils de classes doivent être des nombres valides.")
+            )
+          }
+
+          # Parse labels
+          labels_val <- NULL
+          if (nchar(labels_str) > 0) {
+            labels_val <- trimws(strsplit(labels_str, ",")[[1]])
+          }
+
+          as_fac <- isTRUE(input$categorize_as_factor)
+
+          if (exists("categorize_numeric", where = asNamespace("analytix"))) {
+            df <- analytix::categorize_numeric(df, var = !!rlang::sym(var_nm), breaks = breaks_val, labels = labels_val, as_factor = as_fac)
+          } else {
+            # Fallback
+            vec <- df[[var_nm]]
+            cat_var <- cut(vec, breaks = breaks_val, labels = labels_val, include.lowest = TRUE, right = TRUE)
+            if (!as_fac) cat_var <- as.character(cat_var)
+            df[[var_nm]] <- cat_var
+          }
+          cleaned_data(as.data.frame(df))
+          showNotification("Découpage en classes appliqué avec succès !", type = "message")
+        }
+      }, error = function(e) {
+        showNotification(paste("Erreur lors du recodage :", e$message), type = "error")
+      })
     })
 
     # Advanced Nettoyage & Imputation Handlers

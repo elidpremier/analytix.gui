@@ -168,8 +168,9 @@ mod_specialized_server <- function(id, data_reactive) {
     output$likert_ui <- renderUI({
       res <- likert_res()
       req(res)
-      if (inherits(res, "flextable")) {
-        flextable::htmltools_value(res)
+      ft <- get_flextable(res)
+      if (!is.null(ft)) {
+        flextable::htmltools_value(ft)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_likert"))
       }
@@ -232,8 +233,9 @@ mod_specialized_server <- function(id, data_reactive) {
     output$multi_ui <- renderUI({
       res <- multi_res()
       req(res)
-      if (inherits(res, "flextable")) {
-        flextable::htmltools_value(res)
+      ft <- get_flextable(res)
+      if (!is.null(ft)) {
+        flextable::htmltools_value(ft)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_multi"))
       }
@@ -292,8 +294,9 @@ mod_specialized_server <- function(id, data_reactive) {
     output$correlation_table_ui <- renderUI({
       res <- cor_table_res()
       req(res)
-      if (inherits(res, "flextable")) {
-        flextable::htmltools_value(res)
+      ft <- get_flextable(res)
+      if (!is.null(ft)) {
+        flextable::htmltools_value(ft)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_cor_table"))
       }
@@ -336,8 +339,9 @@ mod_specialized_server <- function(id, data_reactive) {
     output$diagnostic_results_ui <- renderUI({
       res <- diagnostic_res()
       req(res)
-      if (inherits(res, "flextable")) {
-        flextable::htmltools_value(res)
+      ft <- get_flextable(res)
+      if (!is.null(ft)) {
+        flextable::htmltools_value(ft)
       } else if (is.data.frame(res)) {
         tableOutput(ns("raw_diagnostic_table"))
       }
@@ -350,7 +354,8 @@ mod_specialized_server <- function(id, data_reactive) {
       content = function(file) {
         doc <- officer::read_docx()
         res <- likert_res()
-        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        ft <- get_flextable(res)
+        if (!is.null(ft)) doc <- flextable::body_add_flextable(doc, ft)
         else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
         print(doc, target = file)
       }
@@ -361,7 +366,8 @@ mod_specialized_server <- function(id, data_reactive) {
       content = function(file) {
         doc <- officer::read_docx()
         res <- multi_res()
-        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        ft <- get_flextable(res)
+        if (!is.null(ft)) doc <- flextable::body_add_flextable(doc, ft)
         else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
         print(doc, target = file)
       }
@@ -382,7 +388,8 @@ mod_specialized_server <- function(id, data_reactive) {
       content = function(file) {
         doc <- officer::read_docx()
         res <- cor_table_res()
-        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        ft <- get_flextable(res)
+        if (!is.null(ft)) doc <- flextable::body_add_flextable(doc, ft)
         else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
         print(doc, target = file)
       }
@@ -393,7 +400,8 @@ mod_specialized_server <- function(id, data_reactive) {
       content = function(file) {
         doc <- officer::read_docx()
         res <- diagnostic_res()
-        if (inherits(res, "flextable")) doc <- flextable::body_add_flextable(doc, res)
+        ft <- get_flextable(res)
+        if (!is.null(ft)) doc <- flextable::body_add_flextable(doc, ft)
         else doc <- flextable::body_add_flextable(doc, flextable::flextable(as.data.frame(res)))
         print(doc, target = file)
       }
@@ -403,8 +411,9 @@ mod_specialized_server <- function(id, data_reactive) {
       filename = function() { "Performance_Diagnostique.csv" },
       content = function(file) {
         res <- diagnostic_res()
-        if (inherits(res, "flextable")) {
-          write.csv(res$body$dataset, file, row.names = FALSE)
+        df <- get_dataframe(res)
+        if (!is.null(df)) {
+          write.csv(df, file, row.names = FALSE)
         } else if (is.data.frame(res)) {
           write.csv(res, file, row.names = FALSE)
         }
