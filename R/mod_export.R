@@ -139,8 +139,9 @@ mod_export_server <- function(id, data_reactive, univar_reactive, bivar_reactive
           doc <- officer::read_docx()
           
           # Title section
-          doc <- officer::body_add_par(doc, input$report_title, style = "Title")
-          doc <- officer::body_add_par(doc, input$report_subtitle, style = "Subtitle")
+          # Use "heading 1" and "heading 2" instead of "Title" / "Subtitle" styles which may not be present in the default blank document template of officer.
+          doc <- officer::body_add_par(doc, input$report_title, style = "heading 1")
+          doc <- officer::body_add_par(doc, input$report_subtitle, style = "heading 2")
           doc <- officer::body_add_par(doc, paste("Auteur :", input$report_author, "| Organisme :", input$report_institution, "| Date :", Sys.Date()), style = "Normal")
           doc <- officer::body_add_par(doc, "", style = "Normal")
           
