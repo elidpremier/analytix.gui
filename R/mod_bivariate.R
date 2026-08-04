@@ -3,6 +3,32 @@
 #' @param id Identifiant du module Shiny
 #' @param data_reactive Reactive returning the cleaned data.frame
 
+# Helpers locally defined to avoid scoping errors
+get_flextable <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  if (inherits(obj, "flextable")) {
+    return(obj)
+  }
+  if (is.list(obj) && !is.null(obj$flextable) && inherits(obj$flextable, "flextable")) {
+    return(obj$flextable)
+  }
+  return(NULL)
+}
+
+get_dataframe <- function(obj) {
+  if (is.null(obj)) return(NULL)
+  if (is.data.frame(obj)) {
+    return(obj)
+  }
+  if (is.list(obj) && !is.null(obj$data) && is.data.frame(obj$data)) {
+    return(obj$data)
+  }
+  if (is.list(obj) && !is.null(obj$body$dataset) && is.data.frame(obj$body$dataset)) {
+    return(obj$body$dataset)
+  }
+  return(NULL)
+}
+
 mod_bivariate_ui <- function(id) {
   ns <- NS(id)
   
